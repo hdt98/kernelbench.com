@@ -75,7 +75,7 @@ function Footer() {
           {" · "}
           <ContactLink />
           {" · "}
-          <a href="https://github.com/Infatoshi/kernelbench.com">source</a>
+          <a href="https://github.com/hdt98/kernelbench.com">source</a>
         </span>
         <span className="site-footer-dim">
           independent site — not affiliated with Stanford KernelBench

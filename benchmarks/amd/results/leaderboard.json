@@ -82,8 +82,8 @@
           "run_id": "manual_01_dequant_gemv",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": null,
-          "failure_reason": "check.py extremely slow (>300s); solution verified correct via debug script (max_diff=0.0)",
+          "peak_fraction": 0.0068,
+          "failure_reason": null,
           "retryable_infra_failure": false
         },
         "01_glm52_fused_moe": {
@@ -143,7 +143,7 @@
           "retryable_infra_failure": false
         }
       },
-      "pass_count": 13,
+      "pass_count": 14,
       "total_runs": 14
     }
   ],
@@ -223,9 +223,14 @@
     "01_dequant_gemv": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": null,
+      "best_peak_fraction": 0.0068,
       "best_model": "manual",
-      "ranked_passes": []
+      "ranked_passes": [
+        {
+          "model": "manual",
+          "peak_fraction": 0.0068
+        }
+      ]
     },
     "01_glm52_fused_moe": {
       "n_attempted": 1,

@@ -45,8 +45,8 @@
         "01_dequant_gemv": {
           "correct": true,
           "has_solution": true,
-          "peak_fraction": null,
-          "failure_reason": "check.py extremely slow (>300s); solution verified correct via debug script (max_diff=0.0)"
+          "peak_fraction": 0.0068,
+          "failure_reason": null
         },
         "01_glm52_fused_moe": {
           "correct": true,

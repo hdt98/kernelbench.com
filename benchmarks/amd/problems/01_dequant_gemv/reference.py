@@ -55,20 +55,20 @@ def _quantize(w_full: torch.Tensor, group_size: int) -> tuple[torch.Tensor, torc
     """Per-group asymmetric int4 quant with a ragged final group."""
     K, N = w_full.shape
     n_groups = (K + group_size - 1) // group_size
-    w_q = torch.empty(K, N, dtype=torch.uint8)
-    scales = torch.empty(n_groups, N, dtype=torch.float32)
-    zeros = torch.empty(n_groups, N, dtype=torch.float32)
-    for g in range(n_groups):
-        s0, s1 = g * group_size, min((g + 1) * group_size, K)
-        blk = w_full[s0:s1]
-        mn = blk.min(dim=0).values
-        mx = blk.max(dim=0).values
-        sc = (mx - mn).clamp_min(1e-8) / 15.0
-        zp = (-mn / sc).round().clamp(0, 15)
-        w_q[s0:s1] = ((blk / sc) + zp).round().clamp(0, 15).to(torch.uint8)
-        scales[g] = sc
-        zeros[g] = zp
-    return w_q, scales.to(torch.bfloat16), zeros.to(torch.bfloat16)
+    K_pad = n_groups * group_size
+    if K_pad > K:
+        w_padded = torch.zeros(K_pad, N, dtype=w_full.dtype)
+        w_padded[:K] = w_full
+    else:
+        w_padded = w_full
+    w_grouped = w_padded.view(n_groups, group_size, N)
+    mn = w_grouped.min(dim=1).values
+    mx = w_grouped.max(dim=1).values
+    sc = (mx - mn).clamp_min(1e-8) / 15.0
+    zp = (-mn / sc).round().clamp(0, 15)
+    w_q_grouped = ((w_grouped / sc.unsqueeze(1)) + zp.unsqueeze(1)).round().clamp(0, 15).to(torch.uint8)
+    w_q = w_q_grouped.view(K_pad, N)[:K].contiguous()
+    return w_q, sc.to(torch.bfloat16), zp.to(torch.bfloat16)
 
 
 class Model(nn.Module):

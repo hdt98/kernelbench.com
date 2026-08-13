@@ -6,7 +6,7 @@ import { PageHead } from "@/app/_components/page-head"
 // Full agent transcripts live on HuggingFace (per-run trace JSONL); the site
 // keeps only the raw submitted-kernel files locally. Each row links to its HF
 // trace, matching how /hard and /mega surface transcripts.
-const HARD_TRACES_HF = "https://huggingface.co/datasets/Infatoshi/kernelbench-hard-traces"
+const HARD_TRACES_HF = "https://github.com/hdt98/kernelbench.com/tree/feat/amd-gpu-kernelbench/benchmarks/amd"
 
 function traceUrl(runId: string): string {
   return `${HARD_TRACES_HF}/blob/main/${runId}.jsonl`
