@@ -19,7 +19,7 @@ import torch.nn as nn
 
 OP_TYPE = "deepseek_nsa"
 SUPPORTED_PRECISIONS = ["bf16"]
-HARDWARE_REQUIRED = ["RTX_PRO_6000"]
+HARDWARE_REQUIRED = ["MI325X"]
 
 B, H, S, D = 1, 16, 1024, 64
 BLOCK_SIZE = 64

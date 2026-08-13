@@ -22,7 +22,7 @@ import torch.nn.functional as F
 
 OP_TYPE = "glm52_fused_moe"
 SUPPORTED_PRECISIONS = ["bf16"]
-HARDWARE_REQUIRED = ["RTX_PRO_6000"]
+HARDWARE_REQUIRED = ["MI325X"]
 
 T, E, top_k, n_shared, H, I = 4096, 256, 8, 1, 4096, 2048
 

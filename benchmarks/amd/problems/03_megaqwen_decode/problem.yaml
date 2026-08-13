@@ -24,14 +24,10 @@ tolerance:
   bfloat16: 0.08
   float32: 1.0e-3
 
-language: cuda
-require_cuda_evidence: true
+language: any
+require_cuda_evidence: false
 
 forbidden:
-  - "import triton"
-  - "from triton"
-  - "@triton.jit"
-  - "triton.language"
   - "flash_attn"
   - "flashinfer"
   - "scaled_dot_product_attention"

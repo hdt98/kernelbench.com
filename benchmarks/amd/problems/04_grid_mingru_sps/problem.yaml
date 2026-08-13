@@ -25,14 +25,10 @@ logit_tolerance:
   float32: 1.0e-3
 position_exact: true
 
-language: cuda
-require_cuda_evidence: true
+language: any
+require_cuda_evidence: false
 
 forbidden:
-  - "import triton"
-  - "from triton"
-  - "@triton.jit"
-  - "triton.language"
   - "import thunderkittens"
   - "from cutlass.cute"
   - "import tilelang"

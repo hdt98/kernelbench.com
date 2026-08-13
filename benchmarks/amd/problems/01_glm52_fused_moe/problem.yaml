@@ -16,8 +16,8 @@ tolerance:
   bfloat16: 0.08
   float32: 1.0e-3
 
-language: cuda
-require_cuda_evidence: true
+language: any
+require_cuda_evidence: false
 
 # GLM-5 / 5.1 / 5.2 MoE layer (Z.ai): 256 routed, top-8, 1 shared, I=2048.
 moe:
@@ -29,10 +29,6 @@ moe:
   I: 2048
 
 forbidden:
-  - "import triton"
-  - "from triton"
-  - "@triton.jit"
-  - "triton.language"
   - "import vllm"
   - "from vllm"
   - "flashinfer"

@@ -28,7 +28,7 @@ import torch.nn.functional as F
 
 OP_TYPE = "megaqwen_decode"
 SUPPORTED_PRECISIONS = ["bf16"]
-HARDWARE_REQUIRED = ["RTX_PRO_6000"]
+HARDWARE_REQUIRED = ["MI325X"]
 
 HIDDEN = 1024
 INTERMEDIATE = 3072

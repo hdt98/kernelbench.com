@@ -11,13 +11,13 @@
   --color-fg-bright: #ffffff;
   --color-fg-dim: #666666;
   --color-fg-muted: #999999;
-  --color-accent: #76b900;
-  --color-accent-dim: #004831;
+  --color-accent: #ED1C24;
+  --color-accent-dim: #8B0000;
   --color-warn: #fbbf24;
   --color-bad: #fb7185;
   --color-grid: #242424;
   --color-border: #333333;
-  --color-border-strong: #76b900;
+  --color-border-strong: #ED1C24;
 
   --font-sans: Arial, Helvetica, ui-sans-serif, system-ui, -apple-system,
     BlinkMacSystemFont, "Segoe UI", sans-serif;

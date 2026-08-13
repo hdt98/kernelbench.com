@@ -25,7 +25,7 @@ import torch.nn.functional as F
 
 OP_TYPE = "grid_mingru_sps"
 SUPPORTED_PRECISIONS = ["fp32"]
-HARDWARE_REQUIRED = ["RTX_PRO_6000"]
+HARDWARE_REQUIRED = ["MI325X"]
 
 BOARD = 11
 OBS_DIM = 4

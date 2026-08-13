@@ -16,8 +16,8 @@ tolerance:
   bfloat16: 0.1
   float32: 2.0e-3
 
-language: cuda
-require_cuda_evidence: true
+language: any
+require_cuda_evidence: false
 
 # Block size and top-n selected blocks (NSA-inspired; simplified for the bench).
 nsa:
@@ -27,10 +27,6 @@ nsa:
   sliding_window: 64
 
 forbidden:
-  - "import triton"
-  - "from triton"
-  - "@triton.jit"
-  - "triton.language"
   - "flash_attn"
   - "flashinfer"
   - "scaled_dot_product_attention"

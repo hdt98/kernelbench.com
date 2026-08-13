@@ -1,12 +1,5 @@
-import {
-  DEFAULT_GPU,
-  HOME_GPU_TABS,
-  reportCardForBench,
-  PROBLEM_LABELS,
-} from "@/app/_lib/models"
-import { loadModelIndex } from "@/app/_lib/models.server"
+import { PROBLEM_LABELS } from "@/app/_lib/models"
 import { loadLeaderboard } from "@/app/_lib/data"
-import { HomeDecks, type HomeDeck } from "@/app/_components/home-decks"
 
 const citationGraph = {
   "@context": "https://schema.org",
@@ -28,28 +21,7 @@ const citationGraph = {
 }
 
 export default async function HomePage() {
-  const modelIdx = await loadModelIndex()
   const leaderboard = await loadLeaderboard()
-
-  const amdByGpu: NonNullable<HomeDeck["byGpu"]> = {}
-  for (const g of HOME_GPU_TABS) {
-    amdByGpu[g.key] = reportCardForBench(
-      modelIdx,
-      "amd",
-      g.key === "mi325x" ? undefined : g.key,
-    )
-  }
-
-  const decks: HomeDeck[] = [
-    {
-      key: "amd",
-      title: "AMD",
-      accent: "#ED1C24",
-      byGpu: amdByGpu,
-      gpus: HOME_GPU_TABS,
-      defaultGpu: DEFAULT_GPU,
-    },
-  ]
 
   const hw = leaderboard.hardware
   const model = leaderboard.models[0]
@@ -119,9 +91,6 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* Deck (model × problem matrix) */}
-      <HomeDecks decks={decks} />
-
       {/* Leaderboard table */}
       <section className="leaderboard-section">
         <h2 className="section-title">Leaderboard</h2>
@@ -165,30 +134,6 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* Legend */}
-      <p className="hd-legend" aria-label="Outcome legend">
-        <span>
-          <b>pass</b> bar = share of best · click a cell for solution / trace
-        </span>
-        <span>
-          <b className="hd-leg-blank">blank</b> no run yet
-        </span>
-        <span>
-          <b className="hd-leg-wrong">wrong</b> answers don&apos;t match
-        </span>
-        <span>
-          <b className="hd-leg-build">build</b> can&apos;t compile/import
-        </span>
-        <span>
-          <b className="hd-leg-slow">slow</b> timed out
-        </span>
-        <span>
-          <b className="hd-leg-cut">cut</b> stopped early
-        </span>
-        <span>
-          <b className="hd-leg-flag">flag</b> audit reject
-        </span>
-      </p>
     </div>
   )
 }
