@@ -113,9 +113,9 @@
           "run_id": "manual_03_megaqwen_decode",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": null,
-          "failure_reason": "correctness verified (incl. 8k long-ctx spot check); benchmark pending",
-          "retryable_infra_failure": true
+          "peak_fraction": 0.0075,
+          "failure_reason": null,
+          "retryable_infra_failure": false
         },
         "03_topp_mask": {
           "run_id": "manual_topp_mask",
@@ -255,9 +255,14 @@
     "03_megaqwen_decode": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": null,
+      "best_peak_fraction": 0.0075,
       "best_model": "manual",
-      "ranked_passes": []
+      "ranked_passes": [
+        {
+          "model": "manual",
+          "peak_fraction": 0.0075
+        }
+      ]
     },
     "03_topp_mask": {
       "n_attempted": 1,
