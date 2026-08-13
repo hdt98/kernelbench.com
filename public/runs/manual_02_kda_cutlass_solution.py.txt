@@ -1,10 +1,7 @@
-"""KDA forward (chunk form) for AMD MI325X — doubling method.
+"""KDA forward (chunk form) for AMD MI325X — batched doubling method.
 
-Replaces the O(BT) sequential forward substitution loop with the doubling
-method: O(log BT) batched matmuls using the product form of the Neumann
-series: (I-L)^{-1} = (I+L)(I+L^2)(I+L^4)...(I+L^{BT/2}).
-
-Also replaces the custom Triton A-matrix kernel with batched torch matmul.
+Batches all chunk-independent computations (Aqk, g.exp()*k, decay factors)
+into single torch ops, reducing ~285 kernel launches to ~150.
 """
 from __future__ import annotations
 import math
@@ -17,26 +14,7 @@ SUPPORTED_PRECISIONS = ["bf16"]
 HARDWARE_REQUIRED = ["MI325X"]
 
 
-def _compute_a_matrix(k, g):
-    """Compute A_kk = (k*exp(g)) @ (k*exp(-g))^T via batched matmul."""
-    ke = k * g.exp()
-    ke_inv = k * (-g).exp()
-    return torch.matmul(ke, ke_inv.transpose(-1, -2))
-
-
-def _compute_aqk(q_i, k_i, g_i):
-    """Compute Aqk = (q*exp(g)) @ (k*exp(-g))^T."""
-    qe = q_i * g_i.exp()
-    ke_inv = k_i * (-g_i).exp()
-    return qe @ ke_inv.transpose(-1, -2)
-
-
 def _forward_sub_doubling(A, BT, device):
-    """Compute (I - A)^{-1} - I via doubling: O(log BT) batched matmuls.
-
-    (I - L)^{-1} = (I + L)(I + L^2)(I + L^4)...(I + L^{BT/2})
-    where L is strictly lower triangular (nilpotent, L^{BT} = 0).
-    """
     I_bt = torch.eye(BT, device=device, dtype=torch.float32)
     L = A
     result = I_bt + L
@@ -62,30 +40,50 @@ def _kda_forward(q, k, v, g, beta, scale, chunk_size=64):
     beta = rearrange(beta, "b (n c) h -> b h n c", c=BT)
     g = g.cumsum(-2)
 
-    A = _compute_a_matrix(k, g)
+    # Compute A matrix: batched over all chunks
+    ke = k * g.exp()  # [B, H, NT, BT, K]
+    ke_inv = k * (-g).exp()
+    A = torch.matmul(ke, ke_inv.transpose(-1, -2))  # [B, H, NT, BT, BT]
 
     mask_diag_upper = torch.triu(torch.ones(BT, BT, dtype=torch.bool, device=q.device), diagonal=0)
     A = A * beta[..., None]
     A = -A.masked_fill(mask_diag_upper, 0)
 
-    # Doubling method: O(log BT) batched matmuls instead of O(BT) sequential loop
+    # Doubling: still sequential per chunk, but batched across B, H, NT
     A = _forward_sub_doubling(A, BT, q.device)
     A = (A + torch.eye(BT, dtype=torch.float32, device=q.device)) * beta[..., None, :]
 
-    w = A @ (g.exp() * k)
-    u = A @ v
+    # Precompute chunk-independent quantities
+    # w = A @ (g.exp() * k) — batched
+    gk = g.exp() * k  # [B, H, NT, BT, K]
+    w = torch.matmul(A, gk)  # [B, H, NT, BT, K]
+    # u = A @ v — batched
+    u = torch.matmul(A, v)  # [B, H, NT, BT, V]
 
-    S = q.new_zeros(B, H, K, V)
-    o = torch.zeros_like(v)
+    # Precompute Aqk for all chunks
+    qe = q * g.exp()  # [B, H, NT, BT, K]
+    Aqk_all = torch.matmul(qe, ke_inv.transpose(-1, -2))  # [B, H, NT, BT, BT]
     mask_strict_upper = torch.triu(torch.ones(BT, BT, dtype=torch.bool, device=q.device), diagonal=1)
+    Aqk_all = Aqk_all.masked_fill(mask_strict_upper, 0)
+
+    # Precompute decay factors for state update
+    decay_last = g[:, :, :, -1].exp()  # [B, H, NT, K]
+    decay_k = (g[:, :, :, -1:] - g).exp() * k  # [B, H, NT, BT, K]
+    decay_k = decay_k.transpose(-1, -2)  # [B, H, NT, K, BT] — for matmul with v_i
+
+    # Inter-chunk recurrence (sequential — S depends on previous chunk)
+    S = q.new_zeros(B, H, K, V)
+    o = torch.zeros(B, H, NT, BT, V, device=q.device, dtype=torch.float32)
+
     for i in range(NT):
-        q_i, k_i, u_i, g_i, w_i = q[:, :, i], k[:, :, i], u[:, :, i], g[:, :, i], w[:, :, i]
-        Aqk = _compute_aqk(q_i, k_i, g_i)
-        Aqk = Aqk.masked_fill(mask_strict_upper, 0)
-        v_i = u_i - w_i @ S
-        o[:, :, i] = (q_i * g_i.exp()) @ S + Aqk @ v_i
-        S = S * rearrange(g_i[:, :, -1].exp(), "b h k -> b h k 1")
-        S = S + rearrange((g_i[:, :, -1:] - g_i).exp() * k_i, "b h c k -> b h k c") @ v_i
+        # Combine w_i @ S and qe_i @ S into single matmul
+        wq = torch.cat([w[:, :, i], qe[:, :, i]], dim=-2)  # [B, H, 2*BT, K]
+        ws = torch.matmul(wq, S)  # [B, H, 2*BT, V]
+        v_i = u[:, :, i] - ws[:, :, :BT]
+        o[:, :, i] = ws[:, :, BT:] + torch.matmul(Aqk_all[:, :, i], v_i)
+        # State update: S = S * decay + k_decay @ v_i
+        S = S * decay_last[:, :, i, :, None]
+        S = S + torch.matmul(decay_k[:, :, i], v_i)
 
     o = rearrange(o, "b h n c d -> b (n c) h d")
     return o.to(dtype)
