@@ -1,11 +1,50 @@
-"""KDA forward (chunk form) for AMD MI325X.
+"""KDA forward (chunk form) for AMD MI325X — doubling method.
 
-Reproduces the reference computation using pure PyTorch.
+Replaces the O(BT) sequential forward substitution loop with the doubling
+method: O(log BT) batched matmuls using the product form of the Neumann
+series: (I-L)^{-1} = (I+L)(I+L^2)(I+L^4)...(I+L^{BT/2}).
+
+Also replaces the custom Triton A-matrix kernel with batched torch matmul.
 """
 from __future__ import annotations
+import math
 import torch
 import torch.nn as nn
 from einops import rearrange
+
+OP_TYPE = "linear_attention"
+SUPPORTED_PRECISIONS = ["bf16"]
+HARDWARE_REQUIRED = ["MI325X"]
+
+
+def _compute_a_matrix(k, g):
+    """Compute A_kk = (k*exp(g)) @ (k*exp(-g))^T via batched matmul."""
+    ke = k * g.exp()
+    ke_inv = k * (-g).exp()
+    return torch.matmul(ke, ke_inv.transpose(-1, -2))
+
+
+def _compute_aqk(q_i, k_i, g_i):
+    """Compute Aqk = (q*exp(g)) @ (k*exp(-g))^T."""
+    qe = q_i * g_i.exp()
+    ke_inv = k_i * (-g_i).exp()
+    return qe @ ke_inv.transpose(-1, -2)
+
+
+def _forward_sub_doubling(A, BT, device):
+    """Compute (I - A)^{-1} - I via doubling: O(log BT) batched matmuls.
+
+    (I - L)^{-1} = (I + L)(I + L^2)(I + L^4)...(I + L^{BT/2})
+    where L is strictly lower triangular (nilpotent, L^{BT} = 0).
+    """
+    I_bt = torch.eye(BT, device=device, dtype=torch.float32)
+    L = A
+    result = I_bt + L
+    for _ in range(int(math.log2(BT))):
+        L = torch.tril(L @ L, diagonal=-1)
+        result = result @ (I_bt + L)
+    return result - I_bt
+
 
 def _kda_forward(q, k, v, g, beta, scale, chunk_size=64):
     dtype = v.dtype
@@ -23,16 +62,14 @@ def _kda_forward(q, k, v, g, beta, scale, chunk_size=64):
     beta = rearrange(beta, "b (n c) h -> b h n c", c=BT)
     g = g.cumsum(-2)
 
+    A = _compute_a_matrix(k, g)
+
     mask_diag_upper = torch.triu(torch.ones(BT, BT, dtype=torch.bool, device=q.device), diagonal=0)
-    A = torch.zeros(*q.shape[:-1], BT, dtype=torch.float32, device=q.device)
-    for i in range(BT):
-        k_i = k[..., i, :]
-        g_i = g[..., i:i+1, :]
-        A[..., i] = torch.einsum("... c d, ... d -> ... c", k * (g - g_i).exp(), k_i)
     A = A * beta[..., None]
     A = -A.masked_fill(mask_diag_upper, 0)
-    for i in range(1, BT):
-        A[..., i, :i] = A[..., i, :i].clone() + (A[..., i, :, None].clone() * A[..., :, :i].clone()).sum(-2)
+
+    # Doubling method: O(log BT) batched matmuls instead of O(BT) sequential loop
+    A = _forward_sub_doubling(A, BT, q.device)
     A = (A + torch.eye(BT, dtype=torch.float32, device=q.device)) * beta[..., None, :]
 
     w = A @ (g.exp() * k)
@@ -43,11 +80,7 @@ def _kda_forward(q, k, v, g, beta, scale, chunk_size=64):
     mask_strict_upper = torch.triu(torch.ones(BT, BT, dtype=torch.bool, device=q.device), diagonal=1)
     for i in range(NT):
         q_i, k_i, u_i, g_i, w_i = q[:, :, i], k[:, :, i], u[:, :, i], g[:, :, i], w[:, :, i]
-        Aqk = torch.zeros(B, H, BT, BT, dtype=torch.float32, device=q.device)
-        for j in range(BT):
-            k_j = k[:, :, i, j]
-            g_j = g[:, :, i, j:j+1, :]
-            Aqk[..., j] = torch.einsum("... c d, ... d -> ... c", q_i * (g_i - g_j).exp(), k_j)
+        Aqk = _compute_aqk(q_i, k_i, g_i)
         Aqk = Aqk.masked_fill(mask_strict_upper, 0)
         v_i = u_i - w_i @ S
         o[:, :, i] = (q_i * g_i.exp()) @ S + Aqk @ v_i
@@ -56,6 +89,7 @@ def _kda_forward(q, k, v, g, beta, scale, chunk_size=64):
 
     o = rearrange(o, "b h n c d -> b (n c) h d")
     return o.to(dtype)
+
 
 class Model(nn.Module):
     def __init__(self, B, T, H, K, V, chunk_size=64):
@@ -67,6 +101,7 @@ class Model(nn.Module):
 
     def forward(self, q, k, v, g, beta):
         return _kda_forward(q, k, v, g, beta, scale=self.scale, chunk_size=self.chunk_size)
+
 
 B = 2; T = 1024; H = 8; K = 128; V = 128; CHUNK_SIZE = 64
 
@@ -81,3 +116,4 @@ def get_inputs():
 
 def get_init_inputs():
     return [B, T, H, K, V, CHUNK_SIZE]
+

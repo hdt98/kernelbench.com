@@ -1,11 +1,81 @@
-"""Paged attention decode — vectorized PyTorch for AMD MI325X.
+"""Paged attention decode for AMD MI325X — Triton kernel with bf16 MFMA.
 
-Handles per-batch sequence lengths via masking. Gathers pages,
-computes QK^T with softmax and V multiplication in parallel.
+Uses bf16 dot products (tl.dot with bf16 inputs) instead of float32,
+giving 4x compute throughput on gfx942 MFMA units. Softmax state
+(m_i, l_i, acc) remains in float32 for numerical stability.
 """
 import math
 import torch
 import torch.nn as nn
+import triton
+import triton.language as tl
+
+OP_TYPE = "attention"
+SUPPORTED_PRECISIONS = ["bf16"]
+HARDWARE_REQUIRED = ["MI325X"]
+
+BATCH = 8
+NUM_HEADS = 32
+NUM_KV_HEADS = 8
+HEAD_DIM = 128
+SEQ_LEN = 1024
+PAGE_SIZE = 16
+
+
+@triton.jit
+def _paged_attn_kernel(
+    q_ptr, kv_ptr, bt_ptr, sl_ptr, out_ptr,
+    scale,
+    B, H, Hkv, D: tl.constexpr, P: tl.constexpr,
+    G: tl.constexpr,
+    max_blocks,
+    stride_qb, stride_qh, stride_qd,
+    stride_kvblk, stride_kvp, stride_kvh, stride_kvd,
+    stride_btb, stride_btm,
+    stride_ob, stride_oh, stride_od,
+):
+    bh = tl.program_id(0)
+    b = bh // Hkv
+    h_kv = bh % Hkv
+
+    L = tl.load(sl_ptr + b)
+    num_pages = (L + P - 1) // P
+
+    off_g = tl.arange(0, G)
+    off_d = tl.arange(0, D)
+    q_base = b * stride_qb + (h_kv * G) * stride_qh
+    q = tl.load(q_ptr + q_base + off_g[:, None] * stride_qh + off_d[None, :] * stride_qd)
+
+    m_i = tl.full([G], -float("inf"), dtype=tl.float32)
+    l_i = tl.zeros([G], dtype=tl.float32)
+    acc = tl.zeros([G, D], dtype=tl.float32)
+
+    for pi in range(num_pages):
+        page_idx = tl.load(bt_ptr + b * stride_btb + pi * stride_btm)
+        off_p = tl.arange(0, P)
+        kv_base = page_idx * stride_kvblk + h_kv * stride_kvh
+        k_block = tl.load(kv_ptr + kv_base + off_p[:, None] * stride_kvp + off_d[None, :] * stride_kvd)
+        v_block = tl.load(kv_ptr + kv_base + off_p[:, None] * stride_kvp + (off_d + D)[None, :] * stride_kvd)
+
+        pos = pi * P + off_p
+        mask = pos < L
+
+        scores = tl.dot(q.to(tl.bfloat16), tl.trans(k_block).to(tl.bfloat16))
+        scores = scores.to(tl.float32) * scale
+        scores = tl.where(mask[None, :], scores, -float("inf"))
+
+        m_new = tl.maximum(m_i, tl.max(scores, axis=1))
+        alpha = tl.exp(m_i - m_new)
+        p = tl.exp(scores - m_new[:, None])
+        p = tl.where(mask[None, :], p, 0.0)
+        l_i = l_i * alpha + tl.sum(p, axis=1)
+        acc = acc * alpha[:, None] + tl.dot(p.to(tl.bfloat16), v_block.to(tl.bfloat16)).to(tl.float32)
+        m_i = m_new
+
+    out = acc / l_i[:, None]
+    o_base = b * stride_ob + (h_kv * G) * stride_oh
+    tl.store(out_ptr + o_base + off_g[:, None] * stride_oh + off_d[None, :] * stride_od, out.to(tl.bfloat16))
+
 
 class Model(nn.Module):
     def __init__(self, batch, num_heads, num_kv_heads, head_dim, seq_len, page_size):
@@ -26,37 +96,21 @@ class Model(nn.Module):
         Hkv = self.num_kv_heads
         G = self.group_size
         P = self.page_size
-        L_max = int(seq_lens.max().item())
+        out = torch.empty(B, H, D, dtype=query.dtype, device=query.device)
+        _paged_attn_kernel[(B * Hkv,)](
+            query, kv_cache, block_table, seq_lens, out,
+            self.scale, B, H, Hkv, D, P, G,
+            block_table.shape[1],
+            query.stride(0), query.stride(1), query.stride(2),
+            kv_cache.stride(0), kv_cache.stride(1), kv_cache.stride(2), kv_cache.stride(3),
+            block_table.stride(0), block_table.stride(1),
+            out.stride(0), out.stride(1), out.stride(2),
+        )
+        return out
 
-        pages_per_seq = (L_max + P - 1) // P
-        page_indices = block_table[:, :pages_per_seq].reshape(-1).long()
-        kv = kv_cache.index_select(0, page_indices)
-        kv = kv.reshape(B, pages_per_seq * P, Hkv, 2 * D)
-        kv = kv[:, :L_max]
-
-        k = kv[..., :D]
-        v = kv[..., D:]
-
-        k = k.repeat_interleave(G, dim=2)
-        v = v.repeat_interleave(G, dim=2)
-
-        qf = query.float()
-        kf = k.float()
-        vf = v.float()
-
-        scores = torch.einsum("bhd,blhd->bhl", qf, kf) * self.scale
-
-        # Per-batch sequence length masking
-        positions = torch.arange(L_max, device=query.device)
-        mask = positions[None, None, :] < seq_lens[:, None, None]  # (B, 1, L_max)
-        scores = scores.masked_fill(~mask, float("-inf"))
-
-        probs = torch.softmax(scores, dim=-1)
-        out = torch.einsum("bhl,blhd->bhd", probs, vf)
-        return out.to(query.dtype)
 
 def get_inputs():
-    B = 8; H = 32; Hkv = 8; D = 128; L = 1024; P = 16
+    B = BATCH; H = NUM_HEADS; Hkv = NUM_KV_HEADS; D = HEAD_DIM; L = SEQ_LEN; P = PAGE_SIZE
     pages_per_seq = (L + P - 1) // P
     total_pages = max(B * pages_per_seq + 8, 64)
     query = torch.randn(B, H, D, dtype=torch.bfloat16) * 0.1
@@ -67,4 +121,5 @@ def get_inputs():
     return [query, kv_cache, block_table, seq_lens]
 
 def get_init_inputs():
-    return [8, 32, 8, 128, 1024, 16]
+    return [BATCH, NUM_HEADS, NUM_KV_HEADS, HEAD_DIM, SEQ_LEN, PAGE_SIZE]
+
