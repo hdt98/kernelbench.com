@@ -7,6 +7,65 @@ const AMD_ROOT = join(process.cwd(), "benchmarks/amd")
 const AMD_PROBLEMS_ROOT = join(AMD_ROOT, "problems")
 const AMD_LEADERBOARD = "benchmarks/amd/results/leaderboard.json"
 
+const AMD_PROBLEM_COPY: Record<string, { description: string; approach: string }> = {
+  "01_fp8_gemm": {
+    description: "FP8 matrix multiplication using OCP e4m3 format, targeting MFMA units on gfx942.",
+    approach: "Triton FP8 + MFMA hybrid",
+  },
+  "01_dequant_gemv": {
+    description: "Gated W4A16 dequant-GEMV with group size 96. Fuses int4 unpack, group dequant, and gated GEMV.",
+    approach: "Triton int4 dequant + GEMV",
+  },
+  "01_glm52_fused_moe": {
+    description: "GLM-5.2 fused MoE layer with 256 routed experts, top-8 routing, 1 shared expert, SwiGLU activation.",
+    approach: "PyTorch MoE (mem-efficient)",
+  },
+  "02_kda_cutlass": {
+    description: "Kimi Delta Attention (chunk forward). Linear attention with delta decay.",
+    approach: "Triton A-matrix kernel",
+  },
+  "02_deepseek_nsa": {
+    description: "DeepSeek-style Native Sparse Attention with block selection and sliding window.",
+    approach: "Vectorized PyTorch NSA",
+  },
+  "02_segmented_decay_scan": {
+    description: "Segmented exponential-decay scan with per-token episode resets. Associative recurrence.",
+    approach: "Triton sequential scan",
+  },
+  "03_megaqwen_decode": {
+    description: "MegaQwen-style Qwen3-0.6B block decode. Multi-layer transformer with KV cache.",
+    approach: "Eager PyTorch",
+  },
+  "03_paged_attention": {
+    description: "Paged attention decode with block-table KV cache layout. Single-query attention.",
+    approach: "Triton paged attention",
+  },
+  "03_topp_mask": {
+    description: "Sort-free top-p (nucleus) mask. Binary-search threshold without sorting.",
+    approach: "Triton binary-search",
+  },
+  "04_flash_attention": {
+    description: "Causal FlashAttention forward pass with online softmax tiling.",
+    approach: "Triton flash attention",
+  },
+  "04_grid_mingru_sps": {
+    description: "Grid foraging RL environment + 3-layer MinGRU policy. Steps per second metric.",
+    approach: "Triton GRU gate kernel",
+  },
+  "05_topk_bitonic": {
+    description: "TopK selection via bitonic sort network. Parallel sorting on GPU.",
+    approach: "Triton bitonic sort",
+  },
+  "06_sonic_moe_swiglu": {
+    description: "Sonic-MoE up-projection: grouped GEMM + fused SwiGLU activation.",
+    approach: "torch.mm + F.silu",
+  },
+  "07_w4a16_gemm": {
+    description: "W4A16 weight-only quantized GEMM. INT4 weight dequant + BF16 GEMV.",
+    approach: "Triton int4 dequant + GEMV",
+  },
+}
+
 export interface AmdSotaMeta {
   name: string | null
   url: string | null
@@ -22,6 +81,8 @@ export interface AmdProblemMeta {
   slug: string
   name: string | null
   displayName: string
+  description: string
+  approach: string
   precision: string | null
   regime: string | null
   flopsFormula: string | null
@@ -51,6 +112,7 @@ export interface AmdProblemRow {
   bestPeakFraction: number | null
   bestModel: string | null
   bestModelLabel: string | null
+  bestRunId: string | null
   solutionType: string
   meta: AmdProblemMeta
 }
@@ -180,10 +242,13 @@ function parseSota(sectionText: string | null): AmdSotaMeta {
 }
 
 export function parseAmdProblemYaml(slug: string, yamlText: string): AmdProblemMeta {
+  const copy = AMD_PROBLEM_COPY[slug]
   return {
     slug,
     name: scalar(yamlText, "name"),
     displayName: scalar(yamlText, "display_name") ?? problemLabel(slug),
+    description: copy?.description ?? scalar(yamlText, "display_name") ?? problemLabel(slug),
+    approach: copy?.approach ?? "—",
     precision: scalar(yamlText, "precision"),
     regime: scalar(yamlText, "regime"),
     flopsFormula: scalar(yamlText, "flops_formula"),
@@ -270,6 +335,7 @@ export async function loadAmdDashboard(): Promise<AmdDashboard> {
       bestPeakFraction: stats.best_peak_fraction,
       bestModel: stats.best_model,
       bestModelLabel: bestModel,
+      bestRunId: bestCell?.run_id ?? null,
       solutionType,
       meta,
     } satisfies AmdProblemRow

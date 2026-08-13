@@ -25,10 +25,10 @@
   ],
   "models": [
     {
-      "label": "Manual Kernel (Triton + MFMA)",
-      "harness": "manual",
-      "model": "manual",
-      "effort": "",
+      "label": "Codex (GLM-5.2)",
+      "harness": "codex",
+      "model": "glm-5.2",
+      "effort": "xhigh",
       "results": {
         "01_fp8_gemm": {
           "run_id": "manual_fp8_gemm",
