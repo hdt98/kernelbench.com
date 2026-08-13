@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "environment": "amd_containerized",
+  "hardware": {
+    "name": "AMD Instinct MI325X",
+    "sm": "gfx942",
+    "vram_gb": 288,
+    "peak_bandwidth_gb_s": 8000
+  },
+  "problems": [
+    "01_fp8_gemm",
+    "03_paged_attention",
+    "05_topk_bitonic",
+    "06_sonic_moe_swiglu",
+    "07_w4a16_gemm"
+  ],
+  "models": [
+    {
+      "label": "Manual Kernel (Triton + MFMA)",
+      "harness": "manual",
+      "model": "manual",
+      "effort": "",
+      "results": {
+        "01_fp8_gemm": {
+          "run_id": "manual_fp8_gemm",
+          "correct": true,
+          "has_solution": true,
+          "peak_fraction": 0.1065,
+          "failure_reason": null,
+          "retryable_infra_failure": false
+        },
+        "05_topk_bitonic": {
+          "run_id": "manual_topk",
+          "correct": true,
+          "has_solution": true,
+          "peak_fraction": 0.0017,
+          "failure_reason": null,
+          "retryable_infra_failure": false
+        },
+        "03_paged_attention": {
+          "run_id": "manual_paged_attn",
+          "correct": true,
+          "has_solution": true,
+          "peak_fraction": 0.0058,
+          "failure_reason": null,
+          "retryable_infra_failure": false
+        },
+        "07_w4a16_gemm": {
+          "run_id": "manual_w4a16",
+          "correct": true,
+          "has_solution": true,
+          "peak_fraction": 0.0100,
+          "failure_reason": null,
+          "retryable_infra_failure": false
+        },
+        "06_sonic_moe_swiglu": {
+          "run_id": "manual_sonic_moe",
+          "correct": null,
+          "has_solution": true,
+          "peak_fraction": null,
+          "failure_reason": "pending GPU verification",
+          "retryable_infra_failure": true
+        }
+      },
+      "pass_count": 4,
+      "total_runs": 5
+    }
+  ],
+  "per_problem": {
+    "01_fp8_gemm": {
+      "n_attempted": 1,
+      "n_passed": 1,
+      "best_peak_fraction": 0.1065,
+      "best_model": "manual",
+      "ranked_passes": [{"model": "manual", "peak_fraction": 0.1065}]
+    },
+    "05_topk_bitonic": {
+      "n_attempted": 1,
+      "n_passed": 1,
+      "best_peak_fraction": 0.0017,
+      "best_model": "manual",
+      "ranked_passes": [{"model": "manual", "peak_fraction": 0.0017}]
+    },
+    "03_paged_attention": {
+      "n_attempted": 1,
+      "n_passed": 1,
+      "best_peak_fraction": 0.0058,
+      "best_model": "manual",
+      "ranked_passes": [{"model": "manual", "peak_fraction": 0.0058}]
+    },
+    "07_w4a16_gemm": {
+      "n_attempted": 1,
+      "n_passed": 1,
+      "best_peak_fraction": 0.0100,
+      "best_model": "manual",
+      "ranked_passes": [{"model": "manual", "peak_fraction": 0.0100}]
+    },
+    "06_sonic_moe_swiglu": {
+      "n_attempted": 1,
+      "n_passed": 0,
+      "best_peak_fraction": null,
+      "best_model": null,
+      "ranked_passes": []
+    }
+  }
+}
