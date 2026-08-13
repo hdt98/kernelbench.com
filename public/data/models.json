@@ -52,7 +52,7 @@
           "run_id": "manual_03_paged_attention",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0143,
+          "peak_fraction": 0.0666,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_03_paged_attention_solution.py.txt"
@@ -158,8 +158,7 @@
         }
       },
       "pass_count": 14,
-      "total_runs": 14,
-      "bench": "amd"
+      "total_runs": 14
     }
   ],
   "per_problem": {
@@ -195,7 +194,7 @@
       "ranked_passes": [
         {
           "model": "glm-5.2",
-          "peak_fraction": 0.0096
+          "peak_fraction": 0.0121
         }
       ]
     },
@@ -250,12 +249,12 @@
     "03_paged_attention": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0143,
+      "best_peak_fraction": 0.0666,
       "best_model": "glm-5.2",
       "ranked_passes": [
         {
           "model": "glm-5.2",
-          "peak_fraction": 0.0143
+          "peak_fraction": 0.0666
         }
       ]
     },
@@ -327,10 +326,9 @@
       "ranked_passes": [
         {
           "model": "glm-5.2",
-          "peak_fraction": 0.0174
+          "peak_fraction": 0.0184
         }
       ]
     }
-  },
-  "bench": "amd"
+  }
 }

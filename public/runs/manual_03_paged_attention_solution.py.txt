@@ -1,8 +1,7 @@
-"""Paged attention decode for AMD MI325X — Triton kernel with bf16 MFMA.
+"""Paged attention decode for AMD MI325X — multi-page Triton kernel v5.
 
-Uses bf16 dot products (tl.dot with bf16 inputs) instead of float32,
-giving 4x compute throughput on gfx942 MFMA units. Softmax state
-(m_i, l_i, acc) remains in float32 for numerical stability.
+Adaptive PAGES_PER_ITER: 16 for D=64 (BLOCK_KV=256), 8 for D=128 (BLOCK_KV=128).
+Larger tiles for small head_dim where shared memory allows.
 """
 import math
 import torch
@@ -28,6 +27,7 @@ def _paged_attn_kernel(
     scale,
     B, H, Hkv, D: tl.constexpr, P: tl.constexpr,
     G: tl.constexpr,
+    PAGES_PER_ITER: tl.constexpr,
     max_blocks,
     stride_qb, stride_qh, stride_qd,
     stride_kvblk, stride_kvp, stride_kvh, stride_kvd,
@@ -41,8 +41,13 @@ def _paged_attn_kernel(
     L = tl.load(sl_ptr + b)
     num_pages = (L + P - 1) // P
 
+    BLOCK_KV: tl.constexpr = P * PAGES_PER_ITER
     off_g = tl.arange(0, G)
     off_d = tl.arange(0, D)
+    off_kv = tl.arange(0, BLOCK_KV)
+    page_in_group = off_kv // P
+    offset_in_page = off_kv % P
+
     q_base = b * stride_qb + (h_kv * G) * stride_qh
     q = tl.load(q_ptr + q_base + off_g[:, None] * stride_qh + off_d[None, :] * stride_qd)
 
@@ -50,24 +55,25 @@ def _paged_attn_kernel(
     l_i = tl.zeros([G], dtype=tl.float32)
     acc = tl.zeros([G, D], dtype=tl.float32)
 
-    for pi in range(num_pages):
-        page_idx = tl.load(bt_ptr + b * stride_btb + pi * stride_btm)
-        off_p = tl.arange(0, P)
-        kv_base = page_idx * stride_kvblk + h_kv * stride_kvh
-        k_block = tl.load(kv_ptr + kv_base + off_p[:, None] * stride_kvp + off_d[None, :] * stride_kvd)
-        v_block = tl.load(kv_ptr + kv_base + off_p[:, None] * stride_kvp + (off_d + D)[None, :] * stride_kvd)
-
-        pos = pi * P + off_p
-        mask = pos < L
-
+    for pi_start in range(0, num_pages, PAGES_PER_ITER):
+        page_global = pi_start + page_in_group
+        mask_bt = page_global < num_pages
+        page_idx = tl.load(bt_ptr + b * stride_btb + page_global * stride_btm,
+                           mask=mask_bt, other=0)
+        kv_base = page_idx * stride_kvblk + h_kv * stride_kvh + offset_in_page * stride_kvp
+        k_block = tl.load(kv_ptr + kv_base[:, None] + off_d[None, :] * stride_kvd,
+                          mask=mask_bt[:, None], other=0.0)
+        v_block = tl.load(kv_ptr + kv_base[:, None] + (off_d + D)[None, :] * stride_kvd,
+                          mask=mask_bt[:, None], other=0.0)
+        pos = pi_start * P + off_kv
+        mask_pos = pos < L
         scores = tl.dot(q.to(tl.bfloat16), tl.trans(k_block).to(tl.bfloat16))
         scores = scores.to(tl.float32) * scale
-        scores = tl.where(mask[None, :], scores, -float("inf"))
-
+        scores = tl.where(mask_pos[None, :], scores, -float("inf"))
         m_new = tl.maximum(m_i, tl.max(scores, axis=1))
         alpha = tl.exp(m_i - m_new)
         p = tl.exp(scores - m_new[:, None])
-        p = tl.where(mask[None, :], p, 0.0)
+        p = tl.where(mask_pos[None, :], p, 0.0)
         l_i = l_i * alpha + tl.sum(p, axis=1)
         acc = acc * alpha[:, None] + tl.dot(p.to(tl.bfloat16), v_block.to(tl.bfloat16)).to(tl.float32)
         m_i = m_new
@@ -96,15 +102,25 @@ class Model(nn.Module):
         Hkv = self.num_kv_heads
         G = self.group_size
         P = self.page_size
+
+        # Adaptive: D=64 allows PAGES_PER_ITER=16 (BLOCK_KV=256, 64KB shared)
+        # D=128 uses PAGES_PER_ITER=8 (BLOCK_KV=128, 64KB shared)
+        if D <= 64:
+            PAGES_PER_ITER = 16
+        else:
+            PAGES_PER_ITER = 8
+
         out = torch.empty(B, H, D, dtype=query.dtype, device=query.device)
         _paged_attn_kernel[(B * Hkv,)](
             query, kv_cache, block_table, seq_lens, out,
             self.scale, B, H, Hkv, D, P, G,
+            PAGES_PER_ITER,
             block_table.shape[1],
             query.stride(0), query.stride(1), query.stride(2),
             kv_cache.stride(0), kv_cache.stride(1), kv_cache.stride(2), kv_cache.stride(3),
             block_table.stride(0), block_table.stride(1),
             out.stride(0), out.stride(1), out.stride(2),
+            num_warps=4, num_stages=1,
         )
         return out
 
