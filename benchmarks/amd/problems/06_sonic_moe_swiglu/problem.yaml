@@ -1,0 +1,32 @@
+name: 06_sonic_moe_swiglu
+display_name: "Sonic-MoE up-projection (Grouped GEMM + SwiGLU)"
+precision: bf16
+regime: compute
+
+flops_formula: "2 * num_tokens * (intermediate_dim * hidden_dim * 2 + intermediate_dim * hidden_dim)"
+bytes_formula: "num_tokens * hidden_dim * 2 + num_tokens * intermediate_dim * 2 + num_experts * (intermediate_dim * hidden_dim * 2 * 2)"
+
+hardware: [MI325X]
+peak_tflops_key: bf16
+peak_bandwidth_key: dram
+
+tolerance:
+  bfloat16: 0.02
+
+forbidden:
+  - "torch.matmul"
+  - "torch.bmm"
+  - "torch.nn.functional.linear"
+  - "F.linear"
+  - "from sonic_moe"
+
+sota:
+  name: "rocBLAS grouped GEMM (sequential torch.matmul)"
+  url: "https://github.com/ROCm/rocBLAS"
+  function: "torch.matmul (sequential per-expert)"
+  deps:
+    - "torch (ROCm build)"
+  reference_throughput_tflops_mi325x: 800
+
+num_correct_trials: 3
+num_perf_trials: 50
