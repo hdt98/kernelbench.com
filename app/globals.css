@@ -4909,3 +4909,58 @@ pre[class*="language-"] {
   font-size: 0.8rem;
   color: var(--color-text);
 }
+
+/* Methodology Section */
+.methodology-section {
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+}
+.methodology-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.methodology-card {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  padding: 1.25rem;
+}
+.methodology-card h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--color-accent);
+}
+.methodology-card p {
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--color-text-dim);
+}
+.methodology-card code {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.8rem;
+}
+
+/* Footer */
+.site-footer {
+  border-top: 1px solid var(--color-border);
+  padding: 2rem 0;
+  margin-top: 3rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
+}
+.site-footer a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.site-footer a:hover {
+  text-decoration: underline;
+}

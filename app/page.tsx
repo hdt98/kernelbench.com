@@ -149,6 +149,28 @@ export default async function HomePage() {
         </div>
       </section>
 
+      <section className="methodology-section">
+        <h2 className="section-title">Methodology</h2>
+        <div className="methodology-grid">
+          <div className="methodology-card">
+            <h3>Kernel Writing</h3>
+            <p>Each problem provides a reference implementation (naive PyTorch) and a SOTA ceiling. The task is to write a custom GPU kernel that matches the reference output within tolerance and maximizes throughput against the hardware roofline.</p>
+          </div>
+          <div className="methodology-card">
+            <h3>Correctness Gate</h3>
+            <p>Solutions must pass check.py which validates output correctness across multiple shapes, seeds, and numeric stress cases. Floating-point outputs use explicit per-dtype tolerances. No reward hacking.</p>
+          </div>
+          <div className="methodology-card">
+            <h3>Roofline Benchmark</h3>
+            <p>Performance is measured by benchmark.py using median timing over 15 trials. The peak fraction is the ratio of achieved TFLOPS (or GBPS for memory-bound problems) to the hardware peak.</p>
+          </div>
+          <div className="methodology-card">
+            <h3>AMD MI325X</h3>
+            <p>The MI325X is based on gfx942 (CDNA 3) with 288 GB HBM3e and 8 TB/s peak bandwidth. Kernels use Triton on ROCm and PyTorch HIP backends.</p>
+          </div>
+        </div>
+      </section>
+
       <section className="leaderboard-section">
         <h2 className="section-title">Problem Descriptions</h2>
         <div className="problem-descriptions">
