@@ -3,6 +3,7 @@
 Runs solution.Model vs reference.Model across all shapes in shapes.py, 3 seeds
 each, with per-dtype atol/rtol. Also rejects forbidden ops by grep.
 """
+import json
 import re
 import sys
 from pathlib import Path
@@ -97,11 +98,11 @@ def _emit_framework_label():
     """Write framework.txt with the detected kernel framework."""
     patterns = [
         ("ptx",       r"asm\s+volatile|asm\s*\(|mma\.sync|tcgen05\."),
-        ("cutlass3",  r"\bcute::|cutlass/gemm/collective|cutlass::arch::Sm(9|10|12)"),
-        ("cutlass2",  r"cutlass/gemm/device/gemm|cutlass::gemm::device"),
-        ("cuda_wmma", r"\bnvcuda::wmma\b|wmma::fragment"),
+        ("composable_kernel",  r"\bcute::|cutlass/gemm/collective|cutlass::arch::Sm(9|10|12)"),
+        ("composable_kernel",  r"cutlass/gemm/device/gemm|cutlass::gemm::device"),
+        ("rocwmma", r"\bnvcuda::wmma\b|wmma::fragment"),
         ("triton",    r"import\s+triton\b|@triton\.jit|\btl\.dot\b"),
-        ("cuda_raw",  r"torch\.utils\.cpp_extension\.load_inline|__global__\s+void"),
+        ("hip_raw",  r"torch\.utils\.cpp_extension\.load_inline|__global__\s+void"),
     ]
     sol = Path("solution.py")
     if not sol.exists():

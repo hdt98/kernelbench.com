@@ -1,4 +1,4 @@
-"""Correctness + CUDA language gate for the sort-free top-p mask.
+"""Correctness + ROCm language gate for the sort-free top-p mask.
 
 Exact-integer grading with a float64 oracle band: for each token, compute the
 exclusive cumulative mass (fp64 softmax, stable descending order, ties by
@@ -18,8 +18,8 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.eval import cuda_language as cl  # noqa: E402
-from src.eval.cuda_language import collect_solution_sources  # noqa: E402
+from src.eval import rocm_language as cl  # noqa: E402
+from src.eval.rocm_language import collect_solution_sources  # noqa: E402
 from src.eval.numeric_stress import (  # noqa: E402
     numeric_stress_cases,
     numeric_stress_context,
@@ -58,15 +58,15 @@ def main():
             print(f"FAIL: forbidden op used: {forbidden}")
             sys.exit(1)
 
-    ok, messages, report = cl.check_cuda_language(sol_src, meta)
-    Path("cuda_language.json").write_text(json.dumps(report, indent=2) + "\n")
+    ok, messages, report = cl.check_rocm_language(sol_src, meta)
+    Path("rocm_language.json").write_text(json.dumps(report, indent=2) + "\n")
     Path("framework.txt").write_text(report["framework"] + "\n")
     if not ok:
         for m in messages:
             print(m)
         sys.exit(1)
     print(
-        f"cuda_language: ok framework={report['framework']} "
+        f"rocm_language: ok framework={report['framework']} "
         f"evidence={','.join(report['cuda_evidence']) or 'none'}"
     )
 

@@ -3,6 +3,7 @@
 Uses smaller T for check wall-clock (the reference is a sequential Python loop
 over T); benchmark.py runs the full shapes.py deck.
 """
+import json
 import re
 import sys
 from pathlib import Path
@@ -90,10 +91,10 @@ def main():
 def _emit_framework_label():
     patterns = [
         ("ptx", r"asm\s+volatile|asm\s*\(|mma\.sync|tcgen05\."),
-        ("cutlass3", r"\bcute::|cutlass/gemm/collective|cutlass::arch::Sm(9|10|12)"),
-        ("cuda_wmma", r"\bnvcuda::wmma\b|wmma::fragment"),
+        ("composable_kernel", r"\bcute::|cutlass/gemm/collective|cutlass::arch::Sm(9|10|12)"),
+        ("rocwmma", r"\bnvcuda::wmma\b|wmma::fragment"),
         ("triton", r"import\s+triton\b|@triton\.jit|\btl\.dot\b"),
-        ("cuda_raw", r"torch\.utils\.cpp_extension\.load_inline|__global__\s+void"),
+        ("hip_raw", r"torch\.utils\.cpp_extension\.load_inline|__global__\s+void"),
     ]
     sol = Path("solution.py")
     if not sol.exists():

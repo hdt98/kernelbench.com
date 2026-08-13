@@ -22,7 +22,7 @@ import torch.nn as nn
 
 OP_TYPE = "flash_attention_causal"
 SUPPORTED_PRECISIONS = ["bf16"]
-HARDWARE_REQUIRED = ["H100_SXM"]
+HARDWARE_REQUIRED = ["MI325X"]
 
 
 def causal_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:

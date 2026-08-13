@@ -1,4 +1,4 @@
-"""Correctness + CUDA language gate for MegaQwen decode.
+"""Correctness + ROCm language gate for MegaQwen decode.
 
 Uses CHECK_SHAPES only (short ctx). Full 2k/8k/32k/128k is for benchmark.
 Compares last_hidden after prefill+decode — no tokens.
@@ -14,9 +14,9 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.eval import cuda_language as cl  # noqa: E402
+from src.eval import rocm_language as cl  # noqa: E402
 from src.eval.correctness import check_correctness  # noqa: E402
-from src.eval.cuda_language import collect_solution_sources  # noqa: E402
+from src.eval.rocm_language import collect_solution_sources  # noqa: E402
 import reference as ref  # noqa: E402
 import shapes as shape_mod  # noqa: E402
 
@@ -50,15 +50,15 @@ def main():
             print(f"FAIL: forbidden op used: {forbidden}")
             sys.exit(1)
 
-    ok, messages, report = cl.check_cuda_language(sol_src, meta)
-    Path("cuda_language.json").write_text(json.dumps(report, indent=2) + "\n")
+    ok, messages, report = cl.check_rocm_language(sol_src, meta)
+    Path("rocm_language.json").write_text(json.dumps(report, indent=2) + "\n")
     Path("framework.txt").write_text(report["framework"] + "\n")
     if not ok:
         for m in messages:
             print(m)
         sys.exit(1)
     print(
-        f"cuda_language: ok framework={report['framework']} "
+        f"rocm_language: ok framework={report['framework']} "
         f"evidence={','.join(report['cuda_evidence']) or 'none'}"
     )
 
