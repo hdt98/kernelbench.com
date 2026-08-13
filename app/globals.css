@@ -4746,3 +4746,115 @@ pre[class*="language-"] {
 /* Table additions */
 .prob-precision, .prob-regime { font-size: 0.8rem; color: var(--color-fg-muted); }
 .leaderboard-table th { font-size: 0.8rem; }
+
+
+/* Problem Detail Page */
+.problem-detail-header {
+  padding-top: 2rem;
+}
+.problem-detail-breadcrumb {
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
+  margin-bottom: 0.5rem;
+}
+.breadcrumb-link {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.breadcrumb-link:hover {
+  text-decoration: underline;
+}
+.breadcrumb-sep {
+  margin: 0 0.5rem;
+}
+.breadcrumb-current {
+  color: var(--color-text);
+}
+.problem-detail-title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+}
+.problem-detail-tags {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.tag-status {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 9999px;
+}
+.tag-status-pass { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+.tag-status-pending { background: rgba(234, 179, 8, 0.15); color: #eab308; }
+.tag-status-none { background: rgba(107, 114, 128, 0.15); color: #6b7280; }
+
+.problem-detail-section {
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+}
+.problem-detail-desc {
+  color: var(--color-text-dim);
+  line-height: 1.6;
+  font-size: 0.95rem;
+}
+.problem-detail-approach {
+  color: var(--color-text-dim);
+  line-height: 1.6;
+  font-size: 0.95rem;
+}
+.problem-detail-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.detail-stat-card {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.detail-stat-label {
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.detail-stat-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+.detail-stat-pass { color: #22c55e; }
+.detail-stat-pending { color: #eab308; }
+.detail-stat-none { color: #6b7280; }
+.problem-detail-note {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
+  font-style: italic;
+}
+.problem-detail-hw {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+  color: var(--color-text-dim);
+}
+
+/* Clickable problem rows */
+.prob-name a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.prob-name a:hover {
+  text-decoration: underline;
+}
+

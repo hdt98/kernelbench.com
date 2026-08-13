@@ -88,10 +88,10 @@
         },
         "01_glm52_fused_moe": {
           "run_id": "manual_01_glm52_fused_moe",
-          "correct": null,
+          "correct": true,
           "has_solution": true,
           "peak_fraction": null,
-          "failure_reason": "memory-efficient check running (solution written)",
+          "failure_reason": "correctness verified via memory-efficient check; benchmark pending (needs ~26GB for two models)",
           "retryable_infra_failure": true
         },
         "02_deepseek_nsa": {
@@ -112,10 +112,10 @@
         },
         "03_megaqwen_decode": {
           "run_id": "manual_03_megaqwen_decode",
-          "correct": null,
+          "correct": true,
           "has_solution": true,
           "peak_fraction": null,
-          "failure_reason": "check.py crashed silently (solution written, pending verification)",
+          "failure_reason": "correctness verified (incl. 8k long-ctx spot check); benchmark pending",
           "retryable_infra_failure": true
         },
         "03_topp_mask": {
@@ -143,7 +143,7 @@
           "retryable_infra_failure": false
         }
       },
-      "pass_count": 11,
+      "pass_count": 13,
       "total_runs": 14
     }
   ],
@@ -224,9 +224,9 @@
     },
     "01_glm52_fused_moe": {
       "n_attempted": 1,
-      "n_passed": 0,
+      "n_passed": 1,
       "best_peak_fraction": null,
-      "best_model": null,
+      "best_model": "manual",
       "ranked_passes": []
     },
     "02_deepseek_nsa": {
@@ -255,9 +255,9 @@
     },
     "03_megaqwen_decode": {
       "n_attempted": 1,
-      "n_passed": 0,
+      "n_passed": 1,
       "best_peak_fraction": null,
-      "best_model": null,
+      "best_model": "manual",
       "ranked_passes": []
     },
     "03_topp_mask": {

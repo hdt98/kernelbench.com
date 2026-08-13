@@ -111,7 +111,7 @@ export default async function HomePage() {
                   : "—"
                 return (
                   <tr key={prob} className={isPass ? "row-pass" : isPending ? "row-pending" : "row-none"}>
-                    <td className="prob-name">{PROBLEM_LABELS[prob] ?? prob}</td>
+                    <td className="prob-name"><a href={"/problems/" + prob}>{PROBLEM_LABELS[prob] ?? prob}</a></td>
                     <td className="prob-precision">{meta?.precision ?? "—"}</td>
                     <td className="prob-regime">{meta?.regime ?? "—"}</td>
                     <td className="prob-status">
