@@ -4595,3 +4595,139 @@ pre[class*="language-"] {
 .run-page-math strong {
   color: var(--color-accent);
 }
+
+/* ---- AMD KernelBench homepage sections ---- */
+.hero-section {
+  padding: 2rem 0 1.5rem;
+  border-bottom: 1px solid var(--color-border);
+}
+.hero-title {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--color-fg-bright);
+  margin: 0 0 0.5rem;
+  letter-spacing: -0.02em;
+}
+.hero-subtitle {
+  font-size: 0.95rem;
+  color: var(--color-fg-muted);
+  max-width: 640px;
+  line-height: 1.5;
+  margin: 0 0 1.5rem;
+}
+.hero-stats {
+  display: flex;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+.hero-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.hero-stat-val {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--color-fg-bright);
+  font-family: var(--font-mono);
+}
+.hero-stat-label {
+  font-size: 0.72rem;
+  color: var(--color-fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Summary cards */
+.summary-section { margin-top: 1.5rem; }
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+.summary-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.summary-card-pass { border-color: #22c55e33; }
+.summary-card-pending { border-color: #fbbf2433; }
+.summary-card-todo { border-color: var(--color-border); }
+.summary-num {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: var(--color-fg-bright);
+  font-family: var(--font-mono);
+}
+.summary-card-pass .summary-num { color: #22c55e; }
+.summary-card-pending .summary-num { color: var(--color-warn); }
+.summary-card-todo .summary-num { color: var(--color-fg-dim); }
+.summary-label {
+  font-size: 0.72rem;
+  color: var(--color-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Leaderboard table */
+.leaderboard-section { margin-top: 2rem; }
+.section-title {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--color-fg-bright);
+  margin: 0 0 1rem;
+}
+.leaderboard-table-wrap {
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+}
+.leaderboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.leaderboard-table th {
+  background: var(--color-surface-muted);
+  color: var(--color-fg-muted);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.leaderboard-table th.th-num { text-align: right; }
+.leaderboard-table td {
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid var(--color-grid);
+  color: var(--color-fg);
+}
+.leaderboard-table td.td-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+.leaderboard-table tr:last-child td { border-bottom: none; }
+.leaderboard-table tr.row-pass td { background: #22c55e0a; }
+.leaderboard-table tr.row-pending td { background: #fbbf240a; }
+.leaderboard-table tr.row-none td { opacity: 0.6; }
+.prob-name { font-weight: 500; color: var(--color-fg-bright); }
+.sol-type { color: var(--color-fg-muted); font-size: 0.8rem; }
+.status-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.status-pass { background: #22c55e22; color: #22c55e; }
+.status-pending { background: #fbbf2422; color: var(--color-warn); }
+.status-none { background: var(--color-surface-muted); color: var(--color-fg-dim); }
+
