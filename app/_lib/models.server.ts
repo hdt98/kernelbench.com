@@ -135,7 +135,7 @@ function synthesizeAmdIndex(board: AmdLeaderboard): ModelIndex {
     },
     methodology:
       board.methodology ??
-      "AMD KernelBench: per-op kernel deck on AMD MI325X (gfx942, CDNA 3).",
+      "Nexus KernelBench: per-op kernel deck on AMD MI325X (gfx942, CDNA 3).",
     models: [
       {
         slug: model?.model ?? "amd",

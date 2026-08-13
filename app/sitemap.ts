@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next"
 import { loadAmdDashboard } from "@/app/_lib/amd"
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const baseUrl = "https://kernelbench.com"
+  const baseUrl = "https://nexuskernel.com"
   const lastModified = new Date("2026-08-13")
   const dashboard = await loadAmdDashboard()
 

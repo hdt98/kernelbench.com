@@ -31,7 +31,7 @@ export default async function ProblemPage({
     <div className="space-y-6">
       <div className="problem-detail-header">
         <div className="problem-detail-breadcrumb">
-          <a href="/" className="breadcrumb-link">kernelbench.com</a>
+          <a href="/" className="breadcrumb-link">nexuskernel.com</a>
           <span className="breadcrumb-sep">/</span>
           <span className="breadcrumb-current">{row.displayName}</span>
         </div>
