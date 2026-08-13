@@ -1,21 +1,21 @@
 import { PROBLEM_LABELS } from "@/app/_lib/models"
 import { loadLeaderboard } from "@/app/_lib/data"
 
-const PROBLEM_META: Record<string, { precision: string; regime: string; desc: string }> = {
-  "01_fp8_gemm": { precision: "FP8 e4m3", regime: "compute", desc: "FP8 matrix multiplication using OCP e4m3 format, targeting MFMA units on gfx942." },
-  "01_dequant_gemv": { precision: "INT4+BF16", regime: "memory", desc: "Gated W4A16 dequant-GEMV with group size 96. Fuses int4 unpack, group dequant, and gated GEMV." },
-  "01_glm52_fused_moe": { precision: "BF16", regime: "compute", desc: "GLM-5.2 fused MoE layer with 256 routed experts, top-8 routing, 1 shared expert, SwiGLU activation." },
-  "02_kda_cutlass": { precision: "BF16", regime: "compute", desc: "Kimi Delta Attention (chunk forward). Linear attention with delta decay." },
-  "02_deepseek_nsa": { precision: "BF16", regime: "compute", desc: "DeepSeek-style Native Sparse Attention with block selection and sliding window." },
-  "02_segmented_decay_scan": { precision: "BF16", regime: "memory", desc: "Segmented exponential-decay scan with per-token episode resets. Associative recurrence." },
-  "03_megaqwen_decode": { precision: "BF16", regime: "throughput", desc: "MegaQwen-style Qwen3-0.6B block decode. Multi-layer transformer with KV cache." },
-  "03_paged_attention": { precision: "BF16", regime: "memory", desc: "Paged attention decode with block-table KV cache layout. Single-query attention." },
-  "03_topp_mask": { precision: "FP32", regime: "memory", desc: "Sort-free top-p (nucleus) mask. Binary-search threshold without sorting." },
-  "04_flash_attention": { precision: "BF16", regime: "compute", desc: "Causal FlashAttention forward pass with online softmax tiling." },
-  "04_grid_mingru_sps": { precision: "FP32", regime: "throughput", desc: "Grid foraging RL environment + 3-layer MinGRU policy. Steps per second metric." },
-  "05_topk_bitonic": { precision: "FP32", regime: "memory", desc: "TopK selection via bitonic sort network. Parallel sorting on GPU." },
-  "06_sonic_moe_swiglu": { precision: "BF16", regime: "compute", desc: "Sonic-MoE up-projection: grouped GEMM + fused SwiGLU activation." },
-  "07_w4a16_gemm": { precision: "INT4+BF16", regime: "memory", desc: "W4A16 weight-only quantized GEMM. INT4 weight dequant + BF16 GEMV." },
+const PROBLEM_META: Record<string, { precision: string; regime: string; desc: string; sota: string; approach: string }> = {
+  "01_fp8_gemm": { precision: "FP8 e4m3", regime: "compute", desc: "FP8 matrix multiplication using OCP e4m3 format, targeting MFMA units on gfx942.", sota: "hipBLASLt FP8 GEMM", approach: "Triton FP8 + MFMA hybrid" },
+  "01_dequant_gemv": { precision: "INT4+BF16", regime: "memory", desc: "Gated W4A16 dequant-GEMV with group size 96. Fuses int4 unpack, group dequant, and gated GEMV.", sota: "Marlin/machete (group-128)", approach: "Triton int4 dequant + GEMV" },
+  "01_glm52_fused_moe": { precision: "BF16", regime: "compute", desc: "GLM-5.2 fused MoE layer with 256 routed experts, top-8 routing, 1 shared expert, SwiGLU activation.", sota: "vLLM fused_moe", approach: "PyTorch MoE (mem-efficient)" },
+  "02_kda_cutlass": { precision: "BF16", regime: "compute", desc: "Kimi Delta Attention (chunk forward). Linear attention with delta decay.", sota: "FLA chunk_kda (Triton)", approach: "Triton A-matrix kernel" },
+  "02_deepseek_nsa": { precision: "BF16", regime: "compute", desc: "DeepSeek-style Native Sparse Attention with block selection and sliding window.", sota: "naive dense causal attn", approach: "Vectorized PyTorch NSA" },
+  "02_segmented_decay_scan": { precision: "BF16", regime: "memory", desc: "Segmented exponential-decay scan with per-token episode resets. Associative recurrence.", sota: "none (no library kernel)", approach: "Triton sequential scan" },
+  "03_megaqwen_decode": { precision: "BF16", regime: "throughput", desc: "MegaQwen-style Qwen3-0.6B block decode. Multi-layer transformer with KV cache.", sota: "MegaQwen megakernel", approach: "Eager PyTorch" },
+  "03_paged_attention": { precision: "BF16", regime: "memory", desc: "Paged attention decode with block-table KV cache layout. Single-query attention.", sota: "vLLM ROCm PagedAttn", approach: "Triton paged attention" },
+  "03_topp_mask": { precision: "FP32", regime: "memory", desc: "Sort-free top-p (nucleus) mask. Binary-search threshold without sorting.", sota: "torch.sort + cumsum", approach: "Triton binary-search" },
+  "04_flash_attention": { precision: "BF16", regime: "compute", desc: "Causal FlashAttention forward pass with online softmax tiling.", sota: "torch SDPA flash backend", approach: "Triton flash attention" },
+  "04_grid_mingru_sps": { precision: "FP32", regime: "throughput", desc: "Grid foraging RL environment + 3-layer MinGRU policy. Steps per second metric.", sota: "craftax.cu h256/L3", approach: "Triton GRU gate kernel" },
+  "05_topk_bitonic": { precision: "FP32", regime: "memory", desc: "TopK selection via bitonic sort network. Parallel sorting on GPU.", sota: "torch.topk (hipCUB)", approach: "Triton bitonic sort" },
+  "06_sonic_moe_swiglu": { precision: "BF16", regime: "compute", desc: "Sonic-MoE up-projection: grouped GEMM + fused SwiGLU activation.", sota: "rocBLAS grouped GEMM", approach: "torch.mm + F.silu" },
+  "07_w4a16_gemm": { precision: "INT4+BF16", regime: "memory", desc: "W4A16 weight-only quantized GEMM. INT4 weight dequant + BF16 GEMV.", sota: "bitsandbytes NF4 (ROCm)", approach: "Triton int4 dequant + GEMV" },
 }
 
 const citationGraph = {
@@ -115,6 +115,8 @@ export default async function HomePage() {
                 <th>Regime</th>
                 <th>Status</th>
                 <th className="th-num">Peak Fraction</th>
+                <th>SOTA Ceiling</th>
+                <th>Kernel Approach</th>
                 <th>Solution</th>
               </tr>
             </thead>
@@ -140,6 +142,8 @@ export default async function HomePage() {
                       <span className={`status-badge status-${isPass ? "pass" : isPending ? "pending" : "none"}`}>{status}</span>
                     </td>
                     <td className="td-num">{fracStr}</td>
+                    <td className="prob-sota">{meta?.sota ?? "—"}</td>
+                    <td className="prob-approach">{meta?.approach ?? "—"}</td>
                     <td className="sol-type">{solType}</td>
                   </tr>
                 )

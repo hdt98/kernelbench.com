@@ -3,8 +3,8 @@ display_name: "Sonic-MoE up-projection (Grouped GEMM + SwiGLU)"
 precision: bf16
 regime: compute
 
-flops_formula: "2 * num_tokens * (intermediate_dim * hidden_dim * 2 + intermediate_dim * hidden_dim)"
-bytes_formula: "num_tokens * hidden_dim * 2 + num_tokens * intermediate_dim * 2 + num_experts * (intermediate_dim * hidden_dim * 2 * 2)"
+flops_formula: "2 * T_total * (I * H * 2 + I * H)"
+bytes_formula: "T_total * H * 2 + T_total * I * 2 + E * (I * H * 2 * 2)"
 
 hardware: [MI325X]
 peak_tflops_key: bf16

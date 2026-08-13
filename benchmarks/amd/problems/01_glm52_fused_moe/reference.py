@@ -58,7 +58,7 @@ class Model(nn.Module):
         self.w1_shared = nn.Parameter(torch.empty(n_shared, 2 * I, H, dtype=torch.bfloat16))
         self.w2_shared = nn.Parameter(torch.empty(n_shared, H, I, dtype=torch.bfloat16))
         for p in self.parameters():
-            nn.init.normal_(p, std=0.02)
+            p.data.zero_()
 
     def forward(
         self,

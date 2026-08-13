@@ -45,7 +45,7 @@ def main():
         sys.exit(1)
     print(
         f"rocm_language: ok framework={report['framework']} "
-        f"evidence={','.join(report['cuda_evidence']) or 'none'}"
+        f"evidence={','.join(report['kernel_evidence']) or 'none'}"
     )
 
     device = torch.device("cuda:0")

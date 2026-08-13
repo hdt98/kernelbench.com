@@ -4964,3 +4964,5 @@ pre[class*="language-"] {
 .site-footer a:hover {
   text-decoration: underline;
 }
+.prob-sota, .prob-approach { font-size: 0.75rem; color: var(--color-fg-muted); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.problem-detail-sota { color: var(--color-fg-muted); font-size: 0.9rem; line-height: 1.5; margin: 0; }

@@ -47,8 +47,8 @@ class Model(nn.Module):
         # Two weight tensors per expert: gate (E, H, I) and up (E, H, I).
         self.W_gate = nn.Parameter(torch.empty(E, H, I, dtype=torch.bfloat16))
         self.W_up = nn.Parameter(torch.empty(E, H, I, dtype=torch.bfloat16))
-        nn.init.normal_(self.W_gate, std=0.02)
-        nn.init.normal_(self.W_up, std=0.02)
+        _tmp = torch.empty_like(self.W_gate); _tmp.normal_(std=0.02); self.W_gate.data.copy_(_tmp)
+        _tmp = torch.empty_like(self.W_up); _tmp.normal_(std=0.02); self.W_up.data.copy_(_tmp)
 
     def forward(
         self,

@@ -30,9 +30,132 @@ const REMOVED_MODEL_SLUGS = new Set([
 export function loadModelIndex(): Promise<ModelIndex> {
   return readFile(join(process.cwd(), "public/data/models.json"), "utf8").then(
     (raw) => {
-      const idx = JSON.parse(raw) as ModelIndex
+      const idx = JSON.parse(raw) as ModelIndex & { bench?: string }
+      if (idx.bench === "amd") return synthesizeAmdIndex(idx as unknown as AmdLeaderboard)
       idx.models = idx.models.filter((m) => !REMOVED_MODEL_SLUGS.has(m.slug))
       return idx
     },
   )
+}
+
+type AmdLeaderboard = {
+  bench: string
+  hardware: {
+    name: string
+    sm: string
+    vram_gb: number
+    peak_bandwidth_gb_s: number
+  }
+  problems: string[]
+  models: Array<{
+    label: string
+    harness: string
+    model: string
+    effort: string
+    results: Record<
+      string,
+      {
+        run_id: string
+        correct: boolean | null
+        has_solution: boolean
+        peak_fraction: number | null
+        failure_reason?: string | null
+        retryable_infra_failure?: boolean | null
+      }
+    >
+    pass_count: number
+    total_runs: number
+  }>
+  per_problem: Record<
+    string,
+    {
+      n_attempted: number
+      n_passed: number
+      best_peak_fraction: number | null
+      best_model: string | null
+      ranked_passes: { model: string; peak_fraction: number }[]
+    }
+  >
+  methodology?: string
+}
+
+function synthesizeAmdIndex(board: AmdLeaderboard): ModelIndex {
+  const problems = board.problems
+  const model = board.models[0]
+  const cells: Record<string, any> = {}
+  for (const prob of problems) {
+    const c = model?.results?.[prob]
+    cells[prob] = {
+      run_id: c?.run_id ?? null,
+      correct: Boolean(c?.correct),
+      has_solution: Boolean(c?.has_solution),
+      score: c?.peak_fraction ?? null,
+      verdict: "unaudited",
+      valid: Boolean(c?.correct && c?.peak_fraction != null),
+      outcome: c?.correct === false ? "wrong" : c?.has_solution ? "other" : "empty",
+      outcome_label:
+        c?.failure_reason?.replace(/_/g, " ") ??
+        (c?.correct ? "pass" : c?.has_solution ? "written" : "empty"),
+      failure_reason: c?.failure_reason ?? null,
+      elapsed_seconds: null,
+      tok_s: null,
+      ctx: undefined,
+      framework: null,
+      solution_url: null,
+      trace_url: null,
+      detail_url: null,
+    }
+  }
+
+  const validScores = problems
+    .map((prob) => {
+      const c = model?.results?.[prob]
+      const best = board.per_problem[prob]?.best_peak_fraction ?? null
+      if (!c?.correct || c.peak_fraction == null || !best || best <= 0) return null
+      return c.peak_fraction / best
+    })
+    .filter((v): v is number => v != null)
+  const perf = validScores.length
+    ? validScores.reduce((sum, value) => sum + value, 0) / validScores.length
+    : null
+
+  return {
+    generated: new Date().toISOString(),
+    benches: {
+      amd: {
+        label: model?.label ?? "AMD",
+        harness: model?.harness ?? "",
+        effort: model?.effort ?? "",
+        passed: model?.pass_count ?? 0,
+        total_problems: problems.length,
+        perf,
+        cells,
+        gpus: {},
+      },
+    },
+    methodology:
+      board.methodology ??
+      "AMD KernelBench: per-op kernel deck on AMD MI325X (gfx942, CDNA 3).",
+    models: [
+      {
+        slug: model?.model ?? "amd",
+        name: model?.label ?? "AMD",
+        lab: "AMD",
+        benches: {
+          amd: {
+            label: model?.label ?? "AMD",
+            harness: model?.harness ?? "",
+            effort: model?.effort ?? "",
+            passed: model?.pass_count ?? 0,
+            total_problems: problems.length,
+            perf,
+            cells,
+            gpus: {},
+          },
+        },
+        legacy: {},
+        totals: { audited: 0, flagged: 0 },
+      } as ModelIndex["models"][number],
+    ],
+  }
 }

@@ -47,10 +47,10 @@
           "retryable_infra_failure": false
         },
         "03_paged_attention": {
-          "run_id": "manual_paged_attn",
+          "run_id": "manual_03_paged_attention",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0058,
+          "peak_fraction": 0.0122,
           "failure_reason": null,
           "retryable_infra_failure": false
         },
@@ -66,12 +66,12 @@
           "run_id": "manual_sonic_moe",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": null,
-          "failure_reason": "check.py infra crash (solution verified correct via debug script)",
-          "retryable_infra_failure": true
+          "peak_fraction": 0.0217,
+          "failure_reason": null,
+          "retryable_infra_failure": false
         },
         "02_kda_cutlass": {
-          "run_id": "manual_kda",
+          "run_id": "manual_02_kda_cutlass",
           "correct": true,
           "has_solution": true,
           "peak_fraction": 0.0001,
@@ -138,7 +138,7 @@
           "run_id": "manual_04_grid_mingru_sps",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0926,
+          "peak_fraction": 0.0815,
           "failure_reason": null,
           "retryable_infra_failure": false
         }
@@ -175,12 +175,12 @@
     "03_paged_attention": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0058,
+      "best_peak_fraction": 0.0122,
       "best_model": "manual",
       "ranked_passes": [
         {
           "model": "manual",
-          "peak_fraction": 0.0058
+          "peak_fraction": 0.0122
         }
       ]
     },
@@ -199,9 +199,14 @@
     "06_sonic_moe_swiglu": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": null,
+      "best_peak_fraction": 0.0217,
       "best_model": "manual",
-      "ranked_passes": []
+      "ranked_passes": [
+        {
+          "model": "manual",
+          "peak_fraction": 0.0217
+        }
+      ]
     },
     "02_kda_cutlass": {
       "n_attempted": 1,
@@ -297,12 +302,12 @@
     "04_grid_mingru_sps": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0926,
+      "best_peak_fraction": 0.0815,
       "best_model": "manual",
       "ranked_passes": [
         {
           "model": "manual",
-          "peak_fraction": 0.0926
+          "peak_fraction": 0.0815
         }
       ]
     }
