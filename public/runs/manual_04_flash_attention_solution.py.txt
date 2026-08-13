@@ -60,7 +60,7 @@ class Model(nn.Module):
         BD = 1
         while BD < D: BD *= 2
         out = torch.empty_like(q)
-        BQ = 64; BK = 64
+        BQ = 128; BK = 32
         grid = (B, H, triton.cdiv(S, BQ))
         causal_attn_kernel[grid](q, k, v, out, scale, B, H, S, D,
             q.stride(0), q.stride(1), q.stride(2),

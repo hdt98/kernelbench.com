@@ -142,7 +142,7 @@
           "run_id": "manual_flash_attn",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0943,
+          "peak_fraction": 0.128,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_flash_attn_solution.py.txt"
