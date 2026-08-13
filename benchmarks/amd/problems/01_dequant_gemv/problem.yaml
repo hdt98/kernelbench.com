@@ -24,7 +24,7 @@ tolerance:
 group_size: 96
 
 # Triton is allowed on this problem (Mini 01/02 are language-open; 03/04 are
-# CUDA-only). DSLs still fail the gate; a pure torch chain is allowed to run
+# language-restricted). DSLs still fail the gate; a pure torch chain is allowed to run
 # but cannot win the roofline.
 allow_triton: true
 require_cuda_evidence: false

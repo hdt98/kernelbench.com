@@ -6,11 +6,11 @@ const citationGraph = {
   "@graph": [
     {
       "@type": "WebSite",
-      "@id": "https://kernelbench.com/#website",
-      name: "kernelbench.com",
-      url: "https://kernelbench.com",
-      author: { "@type": "Person", name: "Elliot Arledge", url: "https://elliotarledge.com" },
-      description: "Open agentic GPU kernel benchmark results for AMD Instinct GPUs.",
+      "@id": "https://nexuskernel.com/#website",
+      name: "Nexus KernelBench",
+      url: "https://nexuskernel.com",
+      author: { "@type": "Organization", name: "One Mount Group", url: "https://onenexus-do.cloud" },
+      description: "Open GPU kernel benchmark results for AMD Instinct GPUs.",
     },
   ],
 }
@@ -55,9 +55,9 @@ export default async function HomePage() {
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(citationGraph) }} />
 
       <section className="hero-section" id="amd">
-        <h1 className="hero-title">AMD KernelBench</h1>
+        <h1 className="hero-title">Nexus KernelBench</h1>
         <p className="hero-subtitle">
-          Agentic GPU kernel benchmark on AMD Instinct MI325X (gfx942, CDNA 3).
+          GPU kernel benchmark on AMD Instinct MI325X (gfx942, CDNA 3).
           Genuine Triton and HIP kernels — no reward hacking.
         </p>
         <div className="hero-stats">

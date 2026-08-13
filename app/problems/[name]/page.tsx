@@ -1,27 +1,15 @@
 import { notFound } from "next/navigation"
-import { loadLeaderboard, type Leaderboard } from "@/app/_lib/data"
-import { PROBLEM_LABELS } from "@/app/_lib/models"
+import { loadAmdDashboard } from "@/app/_lib/amd"
 
-const PROBLEM_META: Record<string, { precision: string; regime: string; desc: string; sota: string; approach: string }> = {
-  "01_fp8_gemm": { precision: "FP8 e4m3", regime: "compute", desc: "FP8 matrix multiplication using OCP e4m3 format, targeting MFMA units on gfx942.", sota: "hipBLASLt FP8 GEMM (via torch._scaled_mm on ROCm)", approach: "Triton FP8 GEMM with FNUZ scale correction and MFMA hybrid. Handles the FNUZ vs OCP exponent bias difference (bias=8 vs 7) by applying a 4x scale correction. Sanitizes OCP -0 (0x80) to 0x00 since it's NaN in FNUZ." },
-  "01_dequant_gemv": { precision: "INT4+BF16", regime: "memory", desc: "Gated W4A16 dequant-GEMV with group size 96. Fuses int4 unpack, group dequant, and gated GEMV.", sota: "Marlin/machete (group-128 only; group-96 has no library path)", approach: "Triton kernel for int4 dequantization + GEMV with group-wise scales. Handles group size 96 alignment. Falls back to PyTorch for M<=4 cases." },
-  "01_glm52_fused_moe": { precision: "BF16", regime: "compute", desc: "GLM-5.2 fused MoE layer with 256 routed experts, top-8 routing, 1 shared expert, SwiGLU activation.", sota: "vLLM fused_moe / naive expert loop", approach: "PyTorch implementation matching reference semantics. Iterates over 256 experts, gathering tokens per expert, computing SwiGLU gate*up projection and down projection. Uses p.data.zero_() init to avoid nn.init.normal_ segfault." },
-  "02_kda_cutlass": { precision: "BF16", regime: "compute", desc: "Kimi Delta Attention (chunk forward). Linear attention with delta decay.", sota: "FLA chunk_kda (Triton on ROCm)", approach: "Triton A-matrix kernel for fused exp+matmul in the A_kk computation, with vectorized PyTorch for the forward-substitution loop. The sequential 64-iteration loop dominates runtime." },
-  "02_deepseek_nsa": { precision: "BF16", regime: "compute", desc: "DeepSeek-style Native Sparse Attention with block selection and sliding window.", sota: "naive dense causal attention (eager)", approach: "Vectorized PyTorch implementation of NSA. Computes block importance via mean Q*K scores, selects top-n blocks, unions with sliding window, then does sparse softmax attention. Chunked over query positions to manage memory." },
-  "02_segmented_decay_scan": { precision: "BF16", regime: "memory", desc: "Segmented exponential-decay scan with per-token episode resets. Associative recurrence.", sota: "none (no library kernel for segmented scans with reset masks)", approach: "Triton kernel with runtime for-loop over T timesteps. Each program handles one (batch, d_block) pair, iterating sequentially through time with exponential decay accumulation." },
-  "03_megaqwen_decode": { precision: "BF16", regime: "throughput", desc: "MegaQwen-style Qwen3-0.6B block decode. Multi-layer transformer with KV cache.", sota: "MegaQwen megakernel (Infatoshi/MegaQwen)", approach: "Eager PyTorch matching reference numerics. RMSNorm, QKV projection, RoPE, GQA attention, SwiGLU MLP. Uses p.data.zero_() init. Sequential prefill + decode with KV cache management." },
-  "03_paged_attention": { precision: "BF16", regime: "memory", desc: "Paged attention decode with block-table KV cache layout. Single-query attention.", sota: "vLLM ROCm PagedAttention / FlashAttention-ROCm", approach: "Triton paged attention kernel with online softmax and page-by-page KV gather. Each program handles one (batch, kv_head) pair, iterating over pages. GQA handled by processing all query heads per kv_head simultaneously." },
-  "03_topp_mask": { precision: "FP32", regime: "memory", desc: "Sort-free top-p (nucleus) mask. Binary-search threshold without sorting.", sota: "torch.sort + cumsum eager path (the reference itself)", approach: "Triton kernel using 60-iteration binary search on probability threshold. Updates lo/hi bounds using conditional masking (no break statements). Sort-free top-p via threshold convergence." },
-  "04_flash_attention": { precision: "BF16", regime: "compute", desc: "Causal FlashAttention forward pass with online softmax tiling.", sota: "torch SDPA flash backend (F.scaled_dot_product_attention, is_causal)", approach: "Triton flash attention with online softmax. BQ=32, BK=64, BD=128, num_stages=1 to fit within gfx942's 65536-byte shared memory limit. Causal masking via triangular mask." },
-  "04_grid_mingru_sps": { precision: "FP32", regime: "throughput", desc: "Grid foraging RL environment + 3-layer MinGRU policy. Steps per second metric.", sota: "craftax.cu classic h256/L3 side bench (informational)", approach: "Triton GRU gate kernel fusing sigmoid gating + highway connection. tanh computed in PyTorch for accuracy (tl.exp precision on gfx942 is too low for direct tanh). env_step uses PyTorch with exact LCG RNG matching." },
-  "05_topk_bitonic": { precision: "FP32", regime: "memory", desc: "TopK selection via bitonic sort network. Parallel sorting on GPU.", sota: "torch.topk (ROCm / hipCUB internals)", approach: "Triton bitonic sort kernel. Parallel sorting network with O(log^2 n) stages. Each stage compares and swaps elements." },
-  "06_sonic_moe_swiglu": { precision: "BF16", regime: "compute", desc: "Sonic-MoE up-projection: grouped GEMM + fused SwiGLU activation.", sota: "rocBLAS grouped GEMM (sequential torch.matmul)", approach: "PyTorch torch.mm + F.silu implementation. Matches reference interface with expert offsets. Uses p.data.zero_() init." },
-  "07_w4a16_gemm": { precision: "INT4+BF16", regime: "memory", desc: "W4A16 weight-only quantized GEMM. INT4 weight dequant + BF16 GEMV.", sota: "bitsandbytes NF4 (gemv_4bit / dequantize_4bit + matmul) ROCm build", approach: "Triton kernel for INT4 weight dequantization + BF16 GEMV. Unpacks 4-bit weights, applies group scales, then matmul with BF16 activation." },
+const AMD_GPU = "mi325x"
+
+function fmtPct(value: number | null | undefined): string {
+  return value == null ? "—" : (value * 100).toFixed(2) + "%"
 }
 
 export async function generateStaticParams() {
-  const lb = await loadLeaderboard()
-  return lb.problems.map((name) => ({ name }))
+  const dashboard = await loadAmdDashboard()
+  return dashboard.rows.map((row) => ({ name: row.slug }))
 }
 
 export default async function ProblemPage({
@@ -30,38 +18,34 @@ export default async function ProblemPage({
   params: Promise<{ name: string }>
 }) {
   const { name } = await params
-  const lb = await loadLeaderboard()
-  const meta = PROBLEM_META[name]
-  if (!meta) notFound()
+  const dashboard = await loadAmdDashboard()
+  const row = dashboard.rows.find((entry) => entry.slug === name)
+  if (!row) notFound()
 
-  const pp = lb.per_problem[name]
-  const model = lb.models[0]
-  const cell = model?.results?.[name]
-  const isPass = pp?.n_passed > 0
-  const isPending = pp?.n_attempted > 0 && pp?.n_passed === 0
-  const frac = pp?.best_peak_fraction
-  const fracStr = frac != null ? `${(frac * 100).toFixed(2)}%` : "—"
-  const status = isPass ? "PASS" : isPending ? "PENDING" : "NOT ATTEMPTED"
+  const meta = row.meta
+  const status = row.status === "PASS" ? "PASS" : row.status === "PENDING" ? "PENDING" : "NOT ATTEMPTED"
+  const statusClass = row.status === "PASS" ? "pass" : row.status === "PENDING" ? "pending" : "none"
+  const bestRunHref = row.bestRunId ? "/runs/" + AMD_GPU + "/" + row.bestRunId : null
 
   return (
     <div className="space-y-6">
       <div className="problem-detail-header">
         <div className="problem-detail-breadcrumb">
-          <a href="/" className="breadcrumb-link">AMD KernelBench</a>
+          <a href="/" className="breadcrumb-link">Nexus KernelBench</a>
           <span className="breadcrumb-sep">/</span>
-          <span className="breadcrumb-current">{PROBLEM_LABELS[name] ?? name}</span>
+          <span className="breadcrumb-current">{row.displayName}</span>
         </div>
-        <h1 className="problem-detail-title">{PROBLEM_LABELS[name] ?? name}</h1>
+        <h1 className="problem-detail-title">{row.displayName}</h1>
         <div className="problem-detail-tags">
-          <span className="tag tag-precision">{meta.precision}</span>
-          <span className="tag tag-regime">{meta.regime}</span>
-          <span className={`tag tag-status tag-status-${isPass ? "pass" : isPending ? "pending" : "none"}`}>{status}</span>
+          <span className="tag tag-precision">{row.precision ?? "—"}</span>
+          <span className="tag tag-regime">{row.regime ?? "—"}</span>
+          <span className={"tag tag-status tag-status-" + statusClass}>{status}</span>
         </div>
       </div>
 
       <section className="problem-detail-section">
         <h2 className="section-title">Description</h2>
-        <p className="problem-detail-desc">{meta.desc}</p>
+        <p className="problem-detail-desc">{meta.description}</p>
       </section>
 
       <section className="problem-detail-section">
@@ -71,7 +55,85 @@ export default async function ProblemPage({
 
       <section className="problem-detail-section">
         <h2 className="section-title">SOTA Ceiling</h2>
-        <p className="problem-detail-sota">{meta.sota}</p>
+        <div className="space-y-2">
+          <p className="problem-detail-sota">{meta.sota.name ?? "—"}</p>
+          {meta.sota.url && (
+            <a className="underlined-link" href={meta.sota.url} target="_blank" rel="noreferrer">
+              SOTA reference ↗
+            </a>
+          )}
+          {meta.sota.function && <p className="problem-detail-note">Function: {meta.sota.function}</p>}
+          {meta.sota.notes && <p className="problem-detail-note">{meta.sota.notes}</p>}
+          {meta.sota.deps.length > 0 && <p className="problem-detail-note">Deps: {meta.sota.deps.join(", ")}</p>}
+          {meta.sota.referenceThroughputTflopsMi325x != null && (
+            <p className="problem-detail-note">
+              Reference TFLOPS: {meta.sota.referenceThroughputTflopsMi325x.toFixed(3)}
+            </p>
+          )}
+          {meta.sota.referenceThroughputGbpsMi325x != null && (
+            <p className="problem-detail-note">
+              Reference GB/s: {meta.sota.referenceThroughputGbpsMi325x.toFixed(3)}
+            </p>
+          )}
+          {meta.sota.referenceThroughputSpsMi325x != null && (
+            <p className="problem-detail-note">
+              Reference SPS: {meta.sota.referenceThroughputSpsMi325x.toFixed(3)}
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="problem-detail-section">
+        <h2 className="section-title">Benchmark Config</h2>
+        <div className="problem-detail-stats">
+          <div className="detail-stat-card">
+            <span className="detail-stat-label">Precision</span>
+            <span className="detail-stat-value">{row.precision ?? "—"}</span>
+          </div>
+          <div className="detail-stat-card">
+            <span className="detail-stat-label">Regime</span>
+            <span className="detail-stat-value">{row.regime ?? "—"}</span>
+          </div>
+          <div className="detail-stat-card">
+            <span className="detail-stat-label">Correct Trials</span>
+            <span className="detail-stat-value">{meta.numCorrectTrials ?? "—"}</span>
+          </div>
+          <div className="detail-stat-card">
+            <span className="detail-stat-label">Perf Trials</span>
+            <span className="detail-stat-value">{meta.numPerfTrials ?? "—"}</span>
+          </div>
+          <div className="detail-stat-card">
+            <span className="detail-stat-label">Language</span>
+            <span className="detail-stat-value">{meta.language ?? "—"}</span>
+          </div>
+          <div className="detail-stat-card">
+            <span className="detail-stat-label">Triton Allowed</span>
+            <span className="detail-stat-value">{meta.allowTriton == null ? "—" : meta.allowTriton ? "yes" : "no"}</span>
+          </div>
+          <div className="detail-stat-card">
+            <span className="detail-stat-label">Custom Kernel</span>
+            <span className="detail-stat-value">{meta.requireCudaEvidence == null ? "—" : meta.requireCudaEvidence ? "required" : "not required"}</span>
+          </div>
+          <div className="detail-stat-card">
+            <span className="detail-stat-label">Best Peak</span>
+            <span className="detail-stat-value">{fmtPct(row.bestPeakFraction)}</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="problem-detail-section">
+        <h2 className="section-title">Constraints</h2>
+        <div className="space-y-2">
+          <p className="problem-detail-note">Hardware: {meta.hardware.length ? meta.hardware.join(", ") : "—"}</p>
+          <p className="problem-detail-note">Peak TFLOPS key: {meta.peakTflopsKey ?? "—"}</p>
+          <p className="problem-detail-note">Peak bandwidth key: {meta.peakBandwidthKey ?? "—"}</p>
+          {meta.toleranceLines.length > 0 && (
+            <pre className="problem-detail-note whitespace-pre-wrap">{meta.toleranceLines.join("\n")}</pre>
+          )}
+          {meta.forbidden.length > 0 && (
+            <p className="problem-detail-note">Forbidden: {meta.forbidden.join(", ")}</p>
+          )}
+        </div>
       </section>
 
       <section className="problem-detail-section">
@@ -79,36 +141,34 @@ export default async function ProblemPage({
         <div className="problem-detail-stats">
           <div className="detail-stat-card">
             <span className="detail-stat-label">Status</span>
-            <span className={`detail-stat-value detail-stat-${isPass ? "pass" : isPending ? "pending" : "none"}`}>{status}</span>
+            <span className={"detail-stat-value detail-stat-" + statusClass}>{status}</span>
           </div>
           <div className="detail-stat-card">
-            <span className="detail-stat-label">Peak Fraction</span>
-            <span className="detail-stat-value">{fracStr}</span>
+            <span className="detail-stat-label">Best Model</span>
+            <span className="detail-stat-value">{row.bestModelLabel ?? "—"}</span>
           </div>
           <div className="detail-stat-card">
             <span className="detail-stat-label">Solution Type</span>
-            <span className="detail-stat-value">{cell?.has_solution ? "Custom Kernel" : "—"}</span>
+            <span className="detail-stat-value">{row.solutionType}</span>
           </div>
           <div className="detail-stat-card">
-            <span className="detail-stat-label">Correctness</span>
-            <span className={`detail-stat-value detail-stat-${cell?.correct === true ? "pass" : cell?.correct === false ? "none" : "pending"}`}>{cell?.correct === true ? "Verified" : cell?.correct === false ? "Failed" : "Pending"}</span>
+            <span className="detail-stat-label">Best Run</span>
+            <span className="detail-stat-value">
+              {bestRunHref ? <a href={bestRunHref}>run ↗</a> : "—"}
+            </span>
           </div>
         </div>
-        {cell?.failure_reason && (
-          <p className="problem-detail-note">Note: {cell.failure_reason}</p>
-        )}
       </section>
 
       <section className="problem-detail-section">
         <h2 className="section-title">Hardware</h2>
         <div className="problem-detail-hw">
-          <span>{lb.hardware.name}</span>
-          <span>{lb.hardware.sm}</span>
-          <span>{lb.hardware.vram_gb} GB VRAM</span>
-          <span>{lb.hardware.peak_bandwidth_gb_s} GB/s peak bandwidth</span>
+          <span>{dashboard.leaderboard.hardware.name}</span>
+          <span>{dashboard.leaderboard.hardware.sm}</span>
+          <span>{dashboard.leaderboard.hardware.vram_gb} GB VRAM</span>
+          <span>{dashboard.leaderboard.hardware.peak_bandwidth_gb_s} GB/s peak bandwidth</span>
         </div>
       </section>
     </div>
   )
 }
-

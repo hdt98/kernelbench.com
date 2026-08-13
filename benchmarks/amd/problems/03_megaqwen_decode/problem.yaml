@@ -41,7 +41,7 @@ forbidden:
   - "from reference"
 
 sota:
-  name: "MegaQwen (Infatoshi/MegaQwen) — known strong CUDA megakernel"
+  name: "MegaQwen (Infatoshi/MegaQwen) — known strong megakernel"
   url: "https://github.com/Infatoshi/MegaQwen"
   function: "fused_decode_ldg"
   deps: []

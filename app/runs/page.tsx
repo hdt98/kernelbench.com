@@ -4,7 +4,7 @@ import Link from "next/link"
 import { loadLeaderboard } from "@/app/_lib/data"
 import { PageHead } from "@/app/_components/page-head"
 
-// Full agent transcripts live on GitHub (per-run trace JSONL); the site
+// Solution source code lives in the GitHub repo; the site links each run
 // keeps only the raw submitted-kernel files locally. Each row links to its HF
 // trace, matching how /hard and /mega surface transcripts.
 const HARD_TRACES_HF = "https://github.com/hdt98/kernelbench.com/tree/feat/amd-gpu-kernelbench/benchmarks/amd"

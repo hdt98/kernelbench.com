@@ -1,5 +1,5 @@
 name: 03_topp_mask
-display_name: "Sort-free Top-p (nucleus) Mask (CUDA-only)"
+display_name: "Sort-free Top-p (nucleus) Mask"
 precision: fp32
 regime: memory  # one logits read + one mask write; headline metric is MILLISECONDS
 

@@ -1019,7 +1019,7 @@ export function columnsForBench(
       bench === "mega"
         ? `best decode speedup vs optimized-PyTorch baseline over valid (correct + audited-clean) cells · ${displayGpu}`
         : bench === "cuda"
-          ? `mean peak fraction of roofline over full deck (fails = 0) · ${displayGpu} (CUDA-only deck)`
+        ? `mean peak fraction of roofline over full deck (fails = 0) · ${displayGpu} (custom-kernel deck)`
           : `mean peak fraction of roofline over full deck (fails = 0) · ${displayGpu}`,
     unit: bench === "mega" ? "x" : "%",
     columns: ranked,

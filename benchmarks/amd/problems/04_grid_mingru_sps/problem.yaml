@@ -1,5 +1,5 @@
 name: 04_grid_mingru_sps
-display_name: "Grid + 3×MinGRU(h=256) SPS (CUDA-only)"
+display_name: "Grid + 3×MinGRU(h=256) SPS"
 precision: fp32
 regime: throughput
 

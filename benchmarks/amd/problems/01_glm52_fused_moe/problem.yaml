@@ -1,5 +1,5 @@
 name: 01_glm52_fused_moe
-display_name: "GLM-5.2 Fused MoE (CUDA-only)"
+display_name: "GLM-5.2 Fused MoE"
 precision: bf16
 regime: compute
 

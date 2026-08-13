@@ -1,5 +1,5 @@
 name: 02_deepseek_nsa
-display_name: "DeepSeek-style NSA (block-select sparse attn, CUDA-only)"
+display_name: "DeepSeek-style NSA (block-select sparse attn)"
 precision: bf16
 regime: compute
 

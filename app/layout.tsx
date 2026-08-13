@@ -3,7 +3,6 @@ import { Inter } from "next/font/google"
 import { JetBrains_Mono } from "next/font/google"
 import { SiteBrand } from "@/app/_components/site-brand"
 import "./globals.css"
-import { ContactLink } from "./_components/contact-link"
 
 const inter = Inter({
   subsets: ["latin"],
@@ -18,37 +17,38 @@ const mono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://kernelbench.com"),
-  title: "kernelbench.com: Agentic GPU Kernel Benchmark Results",
+  metadataBase: new URL("https://nexuskernel.com"),
+  title: "nexuskernel.com: AMD GPU Kernel Benchmark Results",
   description:
-    "Open agentic GPU kernel benchmark results, repositories, transcripts, and datasets.",
-  authors: [{ name: "Elliot Arledge", url: "https://elliotarledge.com" }],
-  creator: "Elliot Arledge",
-  publisher: "kernelbench.com",
+    "AMD Instinct GPU kernel benchmark results on MI325X (gfx942). Genuine Triton and HIP kernels.",
+  authors: [{ name: "One Mount Group", url: "https://onenexus-do.cloud" }],
+  creator: "One Mount Group",
+  publisher: "nexuskernel.com",
   keywords: [
     "GPU kernels",
-    "CUDA",
+    "ROCm",
+    "HIP",
+    "Triton",
     "benchmark",
     "coding agents",
     "LLM evaluation",
-    "agentic GPU kernels",
   ],
   openGraph: {
-    title: "kernelbench.com: Agentic GPU Kernel Benchmark Results",
+    title: "nexuskernel.com: AMD GPU Kernel Benchmark Results",
     description:
-      "Open agentic GPU kernel benchmark results, repositories, transcripts, and datasets.",
-    url: "https://kernelbench.com",
-    siteName: "kernelbench.com",
+      "AMD Instinct GPU kernel benchmark results on MI325X (gfx942). Genuine Triton and HIP kernels.",
+    url: "https://nexuskernel.com",
+    siteName: "nexuskernel.com",
   },
   other: {
     citation_title:
-      "kernelbench.com: Agentic GPU Kernel Benchmark Results and Run Artifacts",
-    citation_author: "Arledge, Elliot",
+      "nexuskernel.com: AMD GPU Kernel Benchmark Results",
+    citation_author: "One Mount Group",
     citation_publication_date: "2026",
     citation_online_date: "2026",
-    citation_fulltext_html_url: "https://kernelbench.com",
+    citation_fulltext_html_url: "https://nexuskernel.com",
     citation_keywords:
-      "GPU kernels; CUDA; autonomous coding agents; LLM evaluation; benchmark",
+      "GPU kernels; ROCm; HIP; Triton; coding agents; LLM evaluation; benchmark",
   },
 }
 
@@ -78,9 +78,7 @@ function Footer() {
     <footer className="site-footer">
       <div className="site-footer-inner">
         <span className="site-footer-line">
-          built by <a href="https://elliotarledge.com">elliot arledge</a>
-          {" · "}
-          <ContactLink />
+          built by <a href="https://onenexus-do.cloud">One Mount Group</a>
           {" · "}
           <a href="https://github.com/hdt98/kernelbench.com">source</a>
         </span>
