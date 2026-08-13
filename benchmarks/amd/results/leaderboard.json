@@ -97,7 +97,7 @@
           "run_id": "manual_01_glm52_fused_moe",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0096,
+          "peak_fraction": 0.0121,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_01_glm52_fused_moe_solution.py.txt"
@@ -189,7 +189,7 @@
     "01_glm52_fused_moe": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0096,
+      "best_peak_fraction": 0.0121,
       "best_model": "glm-5.2",
       "ranked_passes": [
         {

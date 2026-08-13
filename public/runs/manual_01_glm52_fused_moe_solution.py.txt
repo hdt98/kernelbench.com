@@ -1,10 +1,10 @@
-"""GLM-5.2 fused MoE layer for AMD MI325X — bf16, active-expert-only loop.
+"""GLM-5.2 fused MoE layer for AMD MI325X — bf16.
 
-Improvements:
-1. bf16 accumulation (was float32) — less memory traffic
-2. Fused gate+up projection (single mm instead of two)
-3. Sort tokens by expert for contiguous memory access
-4. Only loop over active experts (not all 256)
+Optimizations:
+1. For T=1 (decode): batched matmul with gathered expert weights (2 bmm instead of 16 sequential mm)
+2. For T>1 (prefill): sorted expert loop with fused gate+up projection
+3. bf16 accumulation throughout
+4. Shared expert fused into the same pipeline
 """
 import torch
 import torch.nn as nn
@@ -28,37 +28,63 @@ class Model(nn.Module):
             p.data.zero_()
 
     def _expert_ffn(self, x, w1, w2):
-        # w1 is (2*I, H) — fused gate and up
-        gate_up = torch.mm(x, w1.T)  # (n, 2*I) bf16
+        gate_up = torch.mm(x, w1.T)
         I = w1.shape[0] // 2
         gate, up = gate_up[..., :I], gate_up[..., I:]
         h = F.silu(gate) * up
-        return torch.mm(h, w2.T)  # (n, H) bf16
+        return torch.mm(h, w2.T)
 
-    def forward(self, x, expert_ids, expert_weights):
-        T, H = x.shape
+    def _decode_forward(self, x, expert_ids, expert_weights):
+        """T=1 decode: batched matmul with gathered weights."""
+        top_k = self.top_k
+        I = self.I
+        H = self.H
 
-        # Shared expert (all tokens) — bf16
+        # Shared expert
         out = self._expert_ffn(x, self.w1_shared[0], self.w2_shared[0])
 
-        # Routed experts: flatten and sort by expert
+        # Gather weights for the top_k experts
+        eids = expert_ids[0]  # (top_k,)
+        w1_gathered = self.w1_routed[eids]  # (top_k, 2*I, H)
+        w2_gathered = self.w2_routed[eids]  # (top_k, H, I)
+
+        # Batched gate+up projection
+        x_expanded = x.unsqueeze(0).expand(top_k, 1, H)  # (top_k, 1, H)
+        gate_up = torch.bmm(x_expanded, w1_gathered.transpose(-1, -2))  # (top_k, 1, 2*I)
+        gate, up = gate_up[:, :, :I], gate_up[:, :, I:]
+        h = F.silu(gate) * up  # (top_k, 1, I)
+
+        # Batched down projection
+        out_expert = torch.bmm(h, w2_gathered.transpose(-1, -2))  # (top_k, 1, H)
+
+        # Weight and sum
+        w = expert_weights[0].to(torch.bfloat16)  # (top_k,)
+        out = out + (w.unsqueeze(-1).unsqueeze(-1) * out_expert).sum(0)
+
+        return out
+
+    def _prefill_forward(self, x, expert_ids, expert_weights):
+        """T>1 prefill: sorted expert loop."""
+        T, H = x.shape
         top_k = self.top_k
+
+        # Shared expert
+        out = self._expert_ffn(x, self.w1_shared[0], self.w2_shared[0])
+
+        # Flatten and sort by expert
         flat_expert_ids = expert_ids.reshape(-1)
         flat_token_ids = torch.arange(T, device=x.device).unsqueeze(1).expand(T, top_k).reshape(-1)
         flat_weights = expert_weights.reshape(-1).to(torch.bfloat16)
 
-        # Sort by expert
         sort_order = torch.argsort(flat_expert_ids)
         sorted_experts = flat_expert_ids[sort_order]
         sorted_tokens = flat_token_ids[sort_order]
         sorted_weights = flat_weights[sort_order]
 
-        # Get active experts and their offsets
         unique_experts, counts = torch.unique(sorted_experts, return_counts=True)
         offsets = torch.zeros(len(unique_experts) + 1, dtype=torch.int32, device=x.device)
         offsets[1:] = torch.cumsum(counts, dim=0)
 
-        # bf16 accumulation
         for i in range(len(unique_experts)):
             e = int(unique_experts[i].item())
             start = int(offsets[i].item())
@@ -72,10 +98,16 @@ class Model(nn.Module):
 
         return out
 
+    def forward(self, x, expert_ids, expert_weights):
+        T = x.shape[0]
+        if T == 1:
+            return self._decode_forward(x, expert_ids, expert_weights)
+        else:
+            return self._prefill_forward(x, expert_ids, expert_weights)
+
 
 T, E, top_k, n_shared, H, I = 4096, 256, 8, 1, 4096, 2048
 
 
 def get_init_inputs():
     return [T, E, top_k, n_shared, H, I]
-
