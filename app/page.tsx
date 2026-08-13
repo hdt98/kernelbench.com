@@ -83,21 +83,19 @@ export default async function HomePage() {
       <section className="chart-section">
         <h2 className="section-title">Peak Fraction by Problem</h2>
         <div className="bar-chart">
-          {passingRows
-            .filter((row) => (row.bestPeakFraction ?? 0) > 0)
-            .map((row) => {
-              const frac = row.bestPeakFraction ?? 0
-              const barWidth = Math.max(frac * 1000, 1)
-              return (
-                <div key={row.slug} className="bar-row">
-                  <a href={"/problems/" + row.slug} className="bar-label">{row.displayName}</a>
-                  <div className="bar-track">
-                    <div className="bar-fill" style={{ width: barWidth + "%" }} />
-                  </div>
-                  <span className="bar-value">{fmtPct(frac)}</span>
+          {passingRows.map((row) => {
+            const frac = row.bestPeakFraction ?? 0
+            const barWidth = Math.max(frac * 1000, 1)
+            return (
+              <div key={row.slug} className="bar-row">
+                <a href={"/problems/" + row.slug} className="bar-label">{row.displayName}</a>
+                <div className="bar-track">
+                  <div className="bar-fill" style={{ width: barWidth + "%" }} />
                 </div>
-              )
-            })}
+                <span className="bar-value">{fmtPct(frac)}</span>
+              </div>
+            )
+          })}
         </div>
       </section>
 

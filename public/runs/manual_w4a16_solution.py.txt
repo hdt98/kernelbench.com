@@ -1,4 +1,6 @@
-"""W4A16 GEMM via fused Triton dequant+matmul on AMD MI325X (gfx942)."""
+"""W4A16 GEMM via fused Triton dequant+matmul on AMD MI325X (gfx942).
+Always uses Triton kernel (no PyTorch fallback for small M).
+"""
 import torch
 import torch.nn as nn
 import triton
@@ -21,20 +23,18 @@ def w4a16_gemm_kernel(
     pid_n = tl.program_id(1)
     offs_m = pid_m * BM + tl.arange(0, BM)
     offs_n = pid_n * BN + tl.arange(0, BN)
-    offs_kh = tl.arange(0, BK // 2)  # half-K offset for packed weights
+    offs_kh = tl.arange(0, BK // 2)
 
+    m_mask = offs_m < M
     acc = tl.zeros((BM, BN), dtype=tl.float32)
 
     for k_start in range(0, K, BK):
-        # Load packed weights: (BK//2, BN) uint8
         wq_ptrs = wq_ptr + ((k_start // 2) + offs_kh[:, None]) * wq_stride_k + offs_n[None, :] * wq_stride_n
         wq = tl.load(wq_ptrs, mask=(offs_n[None, :] < N), other=0)
 
-        # Unpack int4
         w_even = (wq & 0xF).to(tl.bfloat16)
         w_odd = ((wq >> 4) & 0xF).to(tl.bfloat16)
 
-        # Load scales/zeros for this group
         g = k_start // GROUP
         s = tl.load(scales_ptr + g * s_stride_g + offs_n * s_stride_n, mask=offs_n < N, other=0.0)
         z = tl.load(zeros_ptr + g * s_stride_g + offs_n * s_stride_n, mask=offs_n < N, other=0.0)
@@ -42,19 +42,16 @@ def w4a16_gemm_kernel(
         w_even = (w_even - z[None, :]) * s[None, :]
         w_odd = (w_odd - z[None, :]) * s[None, :]
 
-        # Load x_even: x[:, k_start::2] -> (BM, BK//2)
         x_even_ptrs = x_ptr + offs_m[:, None] * x_stride_m + (k_start + offs_kh[None, :] * 2) * x_stride_k
-        x_even = tl.load(x_even_ptrs, mask=(offs_m[:, None] < M) & (k_start + offs_kh[None, :] * 2 < K), other=0.0)
-
-        # Load x_odd: x[:, k_start+1::2] -> (BM, BK//2)
+        x_even = tl.load(x_even_ptrs, mask=m_mask[:, None] & (k_start + offs_kh[None, :] * 2 < K), other=0.0)
         x_odd_ptrs = x_ptr + offs_m[:, None] * x_stride_m + (k_start + offs_kh[None, :] * 2 + 1) * x_stride_k
-        x_odd = tl.load(x_odd_ptrs, mask=(offs_m[:, None] < M) & (k_start + offs_kh[None, :] * 2 + 1 < K), other=0.0)
+        x_odd = tl.load(x_odd_ptrs, mask=m_mask[:, None] & (k_start + offs_kh[None, :] * 2 + 1 < K), other=0.0)
 
         acc += tl.dot(x_even, w_even)
         acc += tl.dot(x_odd, w_odd)
 
-    out_ptrs = out_ptr + offs_m[:, None] * out_stride_m + offs_n[None, :] * out_stride_n
-    tl.store(out_ptrs, acc.to(tl.bfloat16), mask=(offs_m[:, None] < M) & (offs_n[None, :] < N))
+    tl.store(out_ptr + offs_m[:, None] * out_stride_m + offs_n[None, :] * out_stride_n,
+             acc.to(tl.bfloat16), mask=m_mask[:, None] & (offs_n[None, :] < N))
 
 
 class Model(nn.Module):
@@ -84,34 +81,32 @@ class Model(nn.Module):
     def forward(self, x):
         M = x.shape[0]
         N, K = self.N, self.K
-        if M < 4:
-            w_packed = self.w_q
-            w_lo = (w_packed & 0xF).to(torch.bfloat16)
-            w_hi = ((w_packed >> 4) & 0xF).to(torch.bfloat16)
-            w = torch.empty(K, N, dtype=torch.bfloat16, device=x.device)
-            w[0::2] = w_lo
-            w[1::2] = w_hi
-            scales = self.scales.repeat_interleave(self.group_size, dim=0)
-            zeros = self.zeros.repeat_interleave(self.group_size, dim=0)
-            w = (w - zeros) * scales
-            return x.to(torch.bfloat16) @ w
 
-        out = torch.empty(M, N, dtype=torch.bfloat16, device=x.device)
-        BM = 64
-        BN = 64
+        if M < 16:
+            x_padded = torch.zeros(16, K, dtype=x.dtype, device=x.device)
+            x_padded[:M] = x
+            x_use = x_padded
+            M_use = 16
+        else:
+            x_use = x
+            M_use = M
+
+        BM = 16 if M_use < 64 else 64
+        BN = 64 if M_use < 64 else 128
         BK = 128
-        grid = (triton.cdiv(M, BM), triton.cdiv(N, BN))
+        grid = (triton.cdiv(M_use, BM), triton.cdiv(N, BN))
+        out = torch.empty(M_use, N, dtype=torch.bfloat16, device=x.device)
         w4a16_gemm_kernel[grid](
-            x, self.w_q, self.scales, self.zeros, out,
-            M, N, K,
-            x.stride(0), x.stride(1),
+            x_use, self.w_q, self.scales, self.zeros, out,
+            M_use, N, K,
+            x_use.stride(0), x_use.stride(1),
             self.w_q.stride(0), self.w_q.stride(1),
             self.scales.stride(0), self.scales.stride(1),
             out.stride(0), out.stride(1),
             BM=BM, BN=BN, BK=BK, GROUP=self.group_size,
             num_warps=4, num_stages=3,
         )
-        return out
+        return out[:M]
 
 M = 1
 N = 12288

@@ -61,7 +61,7 @@
           "run_id": "manual_w4a16",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0174,
+          "peak_fraction": 0.0184,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_w4a16_solution.py.txt"
@@ -322,7 +322,7 @@
     "07_w4a16_gemm": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0174,
+      "best_peak_fraction": 0.0184,
       "best_model": "glm-5.2",
       "ranked_passes": [
         {
