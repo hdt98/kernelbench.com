@@ -1,0 +1,45 @@
+[project]
+name = "kernelbench-amd"
+version = "0.1.0"
+description = "KernelBench-AMD: ROCm/HIP kernel benchmark for AMD Instinct GPUs."
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.11",
+    "ninja>=1.11",
+    "numpy>=1.26",
+    "pyyaml>=6.0",
+    "rich>=13.7",
+    "matplotlib>=3.9",
+    "hypothesis>=6.140",
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "einops>=0.8.2",
+    "requests<2.33",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+kbh = "src.kbh.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+# ROCm torch: on an AMD GPU node, bootstrap with:
+#   uv pip install torch --index-url https://download.pytorch.org/whl/rocm6.2
+# The pyproject.toml does NOT hard-pin the ROCm index so the same file works
+# on non-GPU hosts (Mac control plane) for lint/test without ROCm wheels.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = ["problems", "problems-*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

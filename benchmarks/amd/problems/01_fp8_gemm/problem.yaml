@@ -1,0 +1,30 @@
+name: 01_fp8_gemm
+display_name: "FP8 e4m3 GEMM"
+precision: fp8_e4m3
+regime: compute
+
+flops_formula: "2 * M * N * K"
+bytes_formula: "M*K + K*N + M*N*2"
+
+hardware: [MI325X]
+peak_tflops_key: fp8
+peak_bandwidth_key: dram
+
+tolerance:
+  bfloat16: 0.2
+  fp8_e4m3fn: 0.2
+
+forbidden:
+  - "torch._scaled_mm"
+  - "torch.ops.aten._scaled_mm"
+
+sota:
+  name: "hipBLASLt FP8 GEMM (via torch._scaled_mm on ROCm)"
+  url: "https://github.com/ROCm/hipBLASLt"
+  function: "torch._scaled_mm -> hipBLASLt FP8 GEMM"
+  deps:
+    - "torch (ROCm build)"
+  reference_throughput_tflops_mi325x: 200  # estimate, verify on-node
+
+num_correct_trials: 3
+num_perf_trials: 30

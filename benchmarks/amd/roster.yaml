@@ -1,0 +1,7 @@
+# KernelBench-AMD model roster.
+# Policy: open — any model can participate (same as hard/cuda/mega).
+policy: open
+gate: none
+
+# The published field is whatever results/leaderboard.json holds.
+# No model list is enumerated — a duplicate list would only go stale.
