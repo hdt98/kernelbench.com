@@ -88,7 +88,7 @@
           "run_id": "manual_01_dequant_gemv",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.017,
+          "peak_fraction": 0.0177,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_01_dequant_gemv_solution.py.txt"
@@ -115,7 +115,7 @@
           "run_id": "manual_02_segmented_decay_scan",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0376,
+          "peak_fraction": 0.0518,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_02_segmented_decay_scan_solution.py.txt"
@@ -177,12 +177,12 @@
     "01_dequant_gemv": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.017,
+      "best_peak_fraction": 0.0177,
       "best_model": "glm-5.2",
       "ranked_passes": [
         {
           "model": "glm-5.2",
-          "peak_fraction": 0.017
+          "peak_fraction": 0.0177
         }
       ]
     },
@@ -225,12 +225,12 @@
     "02_segmented_decay_scan": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0376,
+      "best_peak_fraction": 0.0518,
       "best_model": "glm-5.2",
       "ranked_passes": [
         {
           "model": "glm-5.2",
-          "peak_fraction": 0.0376
+          "peak_fraction": 0.0518
         }
       ]
     },

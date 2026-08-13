@@ -1,12 +1,7 @@
 """Segmented exponential-decay scan via Triton on AMD MI325X.
 
-Optimization: process 4 time steps per iteration to improve instruction-level
-parallelism and memory latency hiding. The loads for steps 1-3 are issued
-before the compute for step 0 finishes, allowing the GPU to overlap memory
-accesses with compute.
-
-Uses larger BLOCK_D (256) to reduce the number of programs and amortize
-launch overhead.
+Optimization: process 8 time steps per iteration for even better ILP
+and memory latency hiding than 4-step. More loads issued before compute.
 """
 import torch
 import torch.nn as nn
@@ -36,45 +31,66 @@ def segmented_scan_kernel(
 
     h = tl.zeros((BLOCK_D,), dtype=tl.float32)
 
-    # Process 4 steps at a time for better ILP
-    T4 = (T // 4) * 4
-    for t in range(0, T4, 4):
-        # Load all 4 steps' data upfront
+    # Process 8 steps at a time for maximum ILP
+    T8 = (T // 8) * 8
+    for t in range(0, T8, 8):
+        # Load all 8 steps data upfront
         x0 = tl.load(x_ptr + b * stride_xb + t * stride_xt + d_offs * stride_xd, mask=d_mask, other=0.0).to(tl.float32)
         x1 = tl.load(x_ptr + b * stride_xb + (t+1) * stride_xt + d_offs * stride_xd, mask=d_mask, other=0.0).to(tl.float32)
         x2 = tl.load(x_ptr + b * stride_xb + (t+2) * stride_xt + d_offs * stride_xd, mask=d_mask, other=0.0).to(tl.float32)
         x3 = tl.load(x_ptr + b * stride_xb + (t+3) * stride_xt + d_offs * stride_xd, mask=d_mask, other=0.0).to(tl.float32)
+        x4 = tl.load(x_ptr + b * stride_xb + (t+4) * stride_xt + d_offs * stride_xd, mask=d_mask, other=0.0).to(tl.float32)
+        x5 = tl.load(x_ptr + b * stride_xb + (t+5) * stride_xt + d_offs * stride_xd, mask=d_mask, other=0.0).to(tl.float32)
+        x6 = tl.load(x_ptr + b * stride_xb + (t+6) * stride_xt + d_offs * stride_xd, mask=d_mask, other=0.0).to(tl.float32)
+        x7 = tl.load(x_ptr + b * stride_xb + (t+7) * stride_xt + d_offs * stride_xd, mask=d_mask, other=0.0).to(tl.float32)
 
         d0 = tl.load(decay_ptr + b * stride_db + t * stride_dt + d_offs * stride_dd, mask=d_mask, other=0.0)
         d1 = tl.load(decay_ptr + b * stride_db + (t+1) * stride_dt + d_offs * stride_dd, mask=d_mask, other=0.0)
         d2 = tl.load(decay_ptr + b * stride_db + (t+2) * stride_dt + d_offs * stride_dd, mask=d_mask, other=0.0)
         d3 = tl.load(decay_ptr + b * stride_db + (t+3) * stride_dt + d_offs * stride_dd, mask=d_mask, other=0.0)
+        d4 = tl.load(decay_ptr + b * stride_db + (t+4) * stride_dt + d_offs * stride_dd, mask=d_mask, other=0.0)
+        d5 = tl.load(decay_ptr + b * stride_db + (t+5) * stride_dt + d_offs * stride_dd, mask=d_mask, other=0.0)
+        d6 = tl.load(decay_ptr + b * stride_db + (t+6) * stride_dt + d_offs * stride_dd, mask=d_mask, other=0.0)
+        d7 = tl.load(decay_ptr + b * stride_db + (t+7) * stride_dt + d_offs * stride_dd, mask=d_mask, other=0.0)
 
         r0 = tl.load(resets_ptr + b * stride_rb + t * stride_rt)
         r1 = tl.load(resets_ptr + b * stride_rb + (t+1) * stride_rt)
         r2 = tl.load(resets_ptr + b * stride_rb + (t+2) * stride_rt)
         r3 = tl.load(resets_ptr + b * stride_rb + (t+3) * stride_rt)
+        r4 = tl.load(resets_ptr + b * stride_rb + (t+4) * stride_rt)
+        r5 = tl.load(resets_ptr + b * stride_rb + (t+5) * stride_rt)
+        r6 = tl.load(resets_ptr + b * stride_rb + (t+6) * stride_rt)
+        r7 = tl.load(resets_ptr + b * stride_rb + (t+7) * stride_rt)
 
         k0 = 1.0 - r0.to(tl.float32)
         k1 = 1.0 - r1.to(tl.float32)
         k2 = 1.0 - r2.to(tl.float32)
         k3 = 1.0 - r3.to(tl.float32)
+        k4 = 1.0 - r4.to(tl.float32)
+        k5 = 1.0 - r5.to(tl.float32)
+        k6 = 1.0 - r6.to(tl.float32)
+        k7 = 1.0 - r7.to(tl.float32)
 
         # Sequential compute
         h = k0 * d0 * h + x0
         tl.store(out_ptr + b * stride_ob + t * stride_ot + d_offs * stride_od, h.to(tl.bfloat16), mask=d_mask)
-
         h = k1 * d1 * h + x1
         tl.store(out_ptr + b * stride_ob + (t+1) * stride_ot + d_offs * stride_od, h.to(tl.bfloat16), mask=d_mask)
-
         h = k2 * d2 * h + x2
         tl.store(out_ptr + b * stride_ob + (t+2) * stride_ot + d_offs * stride_od, h.to(tl.bfloat16), mask=d_mask)
-
         h = k3 * d3 * h + x3
         tl.store(out_ptr + b * stride_ob + (t+3) * stride_ot + d_offs * stride_od, h.to(tl.bfloat16), mask=d_mask)
+        h = k4 * d4 * h + x4
+        tl.store(out_ptr + b * stride_ob + (t+4) * stride_ot + d_offs * stride_od, h.to(tl.bfloat16), mask=d_mask)
+        h = k5 * d5 * h + x5
+        tl.store(out_ptr + b * stride_ob + (t+5) * stride_ot + d_offs * stride_od, h.to(tl.bfloat16), mask=d_mask)
+        h = k6 * d6 * h + x6
+        tl.store(out_ptr + b * stride_ob + (t+6) * stride_ot + d_offs * stride_od, h.to(tl.bfloat16), mask=d_mask)
+        h = k7 * d7 * h + x7
+        tl.store(out_ptr + b * stride_ob + (t+7) * stride_ot + d_offs * stride_od, h.to(tl.bfloat16), mask=d_mask)
 
     # Handle remaining steps
-    for t in range(T4, T):
+    for t in range(T8, T):
         x_t = tl.load(x_ptr + b * stride_xb + t * stride_xt + d_offs * stride_xd, mask=d_mask, other=0.0).to(tl.float32)
         decay_t = tl.load(decay_ptr + b * stride_db + t * stride_dt + d_offs * stride_dd, mask=d_mask, other=0.0)
         reset_t = tl.load(resets_ptr + b * stride_rb + t * stride_rt)
@@ -124,4 +140,3 @@ def get_inputs():
 
 def get_init_inputs():
     return [B, T, D]
-
