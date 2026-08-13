@@ -4858,3 +4858,54 @@ pre[class*="language-"] {
   text-decoration: underline;
 }
 
+
+/* Bar Chart */
+.chart-section {
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+}
+.bar-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.bar-row {
+  display: grid;
+  grid-template-columns: 200px 1fr 80px;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+}
+.bar-label {
+  color: var(--color-accent);
+  text-decoration: none;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bar-label:hover {
+  text-decoration: underline;
+}
+.bar-track {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 9999px;
+  height: 1.5rem;
+  overflow: hidden;
+}
+.bar-fill {
+  background: linear-gradient(90deg, var(--color-accent-dim), var(--color-accent));
+  height: 100%;
+  border-radius: 9999px;
+  min-width: 2px;
+  transition: width 0.3s ease;
+}
+.bar-value {
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: var(--color-text);
+}

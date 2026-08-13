@@ -82,6 +82,28 @@ export default async function HomePage() {
         </div>
       </section>
 
+      <section className="chart-section">
+        <h2 className="section-title">Peak Fraction by Problem</h2>
+        <div className="bar-chart">
+          {passingProblems
+            .filter((p) => (leaderboard.per_problem[p]?.best_peak_fraction ?? 0) > 0)
+            .map((prob) => {
+              const frac = leaderboard.per_problem[prob]?.best_peak_fraction ?? 0
+              const pct = (frac * 100).toFixed(2)
+              const barWidth = Math.max(frac * 1000, 1)
+              return (
+                <div key={prob} className="bar-row">
+                  <a href={"/problems/" + prob} className="bar-label">{PROBLEM_LABELS[prob] ?? prob}</a>
+                  <div className="bar-track">
+                    <div className="bar-fill" style={{ width: barWidth + "%" }} />
+                  </div>
+                  <span className="bar-value">{pct}%</span>
+                </div>
+              )
+            })}
+        </div>
+      </section>
+
       <section className="leaderboard-section">
         <h2 className="section-title">Problem Results</h2>
         <div className="leaderboard-table-wrap">
@@ -138,7 +160,7 @@ export default async function HomePage() {
             return (
               <div key={prob} className={`problem-card ${isPass ? "problem-card-pass" : ""}`}>
                 <div className="problem-card-header">
-                  <span className="problem-card-name">{PROBLEM_LABELS[prob] ?? prob}</span>
+                  <a href={"/problems/" + prob} className="problem-card-name">{PROBLEM_LABELS[prob] ?? prob}</a>
                   <span className="problem-card-tags">
                     <span className="tag tag-precision">{meta.precision}</span>
                     <span className="tag tag-regime">{meta.regime}</span>
