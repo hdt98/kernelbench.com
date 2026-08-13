@@ -17,13 +17,13 @@ const mono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://kernelbench.com"),
-  title: "kernelbench.com: AMD GPU Kernel Benchmark Results",
+  metadataBase: new URL("https://nexuskernel.com"),
+  title: "nexuskernel.com: AMD GPU Kernel Benchmark Results",
   description:
     "AMD Instinct GPU kernel benchmark results on MI325X (gfx942). Genuine Triton and HIP kernels.",
   authors: [{ name: "Elliot Arledge", url: "https://elliotarledge.com" }],
   creator: "Elliot Arledge",
-  publisher: "kernelbench.com",
+  publisher: "nexuskernel.com",
   keywords: [
     "GPU kernels",
     "ROCm",
@@ -34,19 +34,19 @@ export const metadata: Metadata = {
     "LLM evaluation",
   ],
   openGraph: {
-    title: "kernelbench.com: AMD GPU Kernel Benchmark Results",
+    title: "nexuskernel.com: AMD GPU Kernel Benchmark Results",
     description:
       "AMD Instinct GPU kernel benchmark results on MI325X (gfx942). Genuine Triton and HIP kernels.",
-    url: "https://kernelbench.com",
-    siteName: "kernelbench.com",
+    url: "https://nexuskernel.com",
+    siteName: "nexuskernel.com",
   },
   other: {
     citation_title:
-      "kernelbench.com: AMD GPU Kernel Benchmark Results",
+      "nexuskernel.com: AMD GPU Kernel Benchmark Results",
     citation_author: "Elliot Arledge",
     citation_publication_date: "2026",
     citation_online_date: "2026",
-    citation_fulltext_html_url: "https://kernelbench.com",
+    citation_fulltext_html_url: "https://nexuskernel.com",
     citation_keywords:
       "GPU kernels; ROCm; HIP; Triton; coding agents; LLM evaluation; benchmark",
   },
