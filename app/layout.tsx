@@ -1,8 +1,15 @@
 import type { Metadata } from "next"
+import { Inter } from "next/font/google"
 import { JetBrains_Mono } from "next/font/google"
 import { SiteBrand } from "@/app/_components/site-brand"
 import "./globals.css"
 import { ContactLink } from "./_components/contact-link"
+
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-inter",
+})
 
 const mono = JetBrains_Mono({
   subsets: ["latin"],
@@ -54,10 +61,10 @@ export default function RootLayout({
     // suppressHydrationWarning: browser extensions (Dark Reader, etc.) inject
     // attributes on <html>/<body> before React hydrates; without this the
     // Mac preview shows a noisy hydration overlay that is not app state.
-    <html lang="en" className={mono.variable} data-theme="dark" suppressHydrationWarning>
-      <body className="min-h-screen" suppressHydrationWarning>
+    <html lang="en" className={inter.variable + " " + mono.variable} suppressHydrationWarning>
+      <body className="min-h-screen bg-white text-zinc-950 antialiased" suppressHydrationWarning>
         <SiteBrand />
-        <main className="container mx-auto px-4 sm:px-6 max-w-7xl pt-6 pb-12">
+        <main className="mx-auto max-w-7xl px-6 lg:px-8 pt-8 pb-16">
           {children}
         </main>
         <Footer />
