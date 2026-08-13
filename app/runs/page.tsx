@@ -1,9 +1,10 @@
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
+import Link from "next/link"
 import { loadLeaderboard } from "@/app/_lib/data"
 import { PageHead } from "@/app/_components/page-head"
 
-// Full agent transcripts live on HuggingFace (per-run trace JSONL); the site
+// Full agent transcripts live on GitHub (per-run trace JSONL); the site
 // keeps only the raw submitted-kernel files locally. Each row links to its HF
 // trace, matching how /hard and /mega surface transcripts.
 const HARD_TRACES_HF = "https://github.com/hdt98/kernelbench.com/tree/feat/amd-gpu-kernelbench/benchmarks/amd"
@@ -47,7 +48,7 @@ async function loadAllRuns(): Promise<RunRow[]> {
   const out: RunRow[] = []
   for (const m of lb.models) {
     for (const [problem, cell] of Object.entries(m.results)) {
-      if (!solutionEntries.has(cell.run_id)) continue
+      // AMD: show all runs from leaderboard, not just those with solution files in public/runs
       out.push({
         run_id: cell.run_id,
         problem,
@@ -160,14 +161,12 @@ export default async function RunsIndex({ searchParams }: RunsIndexProps) {
         notes={
           <p>
             One row per (model, problem) cell, scored rows sorted by peak
-            fraction desc. Click any row to open the full agent transcript on
-            HuggingFace — every tool call, every reasoning step, the
-            model&apos;s solution.py, and the result. Transcripts are published
-            as per-run JSONL in the{" "}
+            fraction desc. Click any row to view the run detail page with
+            benchmark results and kernel approach. Source code lives in the{" "}
             <a href={HARD_TRACES_HF} target="_blank" rel="noreferrer">
-              kernelbench-hard-traces
+              AMD benchmarks directory
             </a>{" "}
-            dataset.
+            on GitHub.
           </p>
         }
       />
@@ -189,24 +188,20 @@ export default async function RunsIndex({ searchParams }: RunsIndexProps) {
               <tr key={r.run_id}>
                 <td className="text-right pr-4">{statusCell(r)}</td>
                 <td className="text-[var(--color-fg)] whitespace-nowrap">
-                  <a
-                    href={traceUrl(r.run_id)}
-                    target="_blank"
-                    rel="noreferrer"
+                  <Link
+                    href={"/runs/mi325x/" + r.run_id}
                     className="no-underline hover:text-[var(--color-accent)]"
                   >
                     {r.problem}
-                  </a>
+                  </Link>
                 </td>
                 <td className="text-[var(--color-fg-bright)] whitespace-nowrap">
-                  <a
-                    href={traceUrl(r.run_id)}
-                    target="_blank"
-                    rel="noreferrer"
+                  <Link
+                    href={"/runs/mi325x/" + r.run_id}
                     className="no-underline hover:text-[var(--color-accent)]"
                   >
                     {shortModel(r.harness, r.model, r.effort)}
-                  </a>
+                  </Link>
                 </td>
                 <td className={harnessClass(r.harness)}>
                   {harnessLabel(r.harness)}
@@ -217,14 +212,12 @@ export default async function RunsIndex({ searchParams }: RunsIndexProps) {
                     : "-"}
                 </td>
                 <td className="text-[var(--color-fg-muted)] text-[10px]">
-                  <a
-                    href={traceUrl(r.run_id)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="no-underline hover:text-[var(--color-accent)]"
+                  <Link
+                    href={"/runs/mi325x/" + r.run_id}
+                    className="no-underline hover:text-[var(--color-accent)] text-[10px]"
                   >
                     {r.run_id}
-                  </a>
+                  </Link>
                 </td>
               </tr>
             ))}
