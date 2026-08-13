@@ -25,9 +25,10 @@ import { ModelStoryArticle, ModelStoryLead } from "@/app/_components/model-story
 // whose page carries the integrity record). Everything renders from
 // public/data/models.json at build time.
 
-export const dynamicParams = false
+export const dynamicParams = true
 
 export async function generateStaticParams() {
+  return []
   const idx = await loadModelIndex()
   return idx.models.map((m) => ({ slug: m.slug }))
 }

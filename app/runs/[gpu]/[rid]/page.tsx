@@ -19,7 +19,7 @@ import { loadModelIndex } from "@/app/_lib/models.server"
 // mega, which archives no per-shape sweep); the redacted kernel is inlined
 // from public/runs at build so the page needs no client fetches.
 
-export const dynamicParams = false
+export const dynamicParams = true
 
 const GPU_NAMES: Record<string, string> = {
   rtxpro6000: "RTX PRO 6000",
@@ -157,11 +157,12 @@ async function loadDetail(gpu: string, rid: string): Promise<RunDetailData | nul
 }
 
 export async function generateStaticParams() {
+  return []
   const idx = await loadModelIndex()
   const params: { gpu: string; rid: string }[] = []
   const seen = new Set<string>()
   for (const m of idx.models) {
-    for (const block of Object.values(m.benches)) {
+    for (const block of Object.values(m.benches ?? {})) {
       if (!block) continue
       const views: { g: string; cells: Record<string, ModelCell> }[] = [
         { g: CANONICAL_GPU, cells: block.cells ?? {} },
