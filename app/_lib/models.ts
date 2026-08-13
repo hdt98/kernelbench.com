@@ -4,7 +4,7 @@
 // scripts/build_model_index.py on every publish). This module is
 // client-component-safe: the fs reader lives in ./models.server.
 
-export type Bench = "hard" | "mega" | "cuda"
+export type Bench = "hard" | "mega" | "cuda" | "amd"
 
 export interface ModelCell {
   run_id: string | null
@@ -105,6 +105,7 @@ export const BENCH_LABELS: Record<Bench, string> = {
   hard: "Hard",
   mega: "Mega",
   cuda: "CUDA",
+  amd: "AMD",
 }
 
 export const PROBLEM_LABELS: Record<string, string> = {
@@ -121,6 +122,12 @@ export const PROBLEM_LABELS: Record<string, string> = {
   "04_grid_mingru_sps": "Grid + MinGRU SPS",
   "01_rmsnorm_residual": "RMSNorm + Residual",
   "02_online_softmax": "Online Softmax",
+  "01_fp8_gemm": "FP8 GEMM",
+  "05_topk_bitonic": "TopK Bitonic",
+  "03_paged_attention": "Paged Attention",
+  "06_sonic_moe_swiglu": "Sonic MoE",
+  "07_w4a16_gemm": "W4A16 GEMM",
+  "02_kda_cutlass": "KDA CUTLASS",
 }
 
 /** Mega is the single Kimi-Linear megakernel cell. `01_rl_grid_ppo` was removed
@@ -164,13 +171,14 @@ export const CANONICAL_GPU = "rtxpro6000"
  * scripts/build_model_index.py.
  */
 export const HOME_GPU_TABS: { key: string; label: string }[] = [
+  { key: "mi325x", label: "AMD MI325X" },
   { key: "h100", label: "H100 PCIe" },
   { key: "rtxpro6000", label: "RTX PRO 6000" },
   { key: "b200", label: "B200" },
 ]
 
 /** Homepage ranking chart order (Mega → CUDA → Hard). */
-export const HOME_BENCH_ORDER: Bench[] = ["mega", "cuda", "hard"]
+export const HOME_BENCH_ORDER: Bench[] = ["amd", "mega", "cuda", "hard"]
 
 /**
  * Lab brand presentation for charts (AA-style: bar color + logo keyed by lab).

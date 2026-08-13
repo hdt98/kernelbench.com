@@ -139,7 +139,7 @@ export type ProblemBaselines = {
 }
 
 export async function loadBaselines(): Promise<ProblemBaselines | null> {
-  const path = join(REPO_ROOT, "benchmarks/hard/results/problem_baselines.json")
+  const path = join(REPO_ROOT, "benchmarks/amd/results/problem_baselines.json")
   try {
     const text = await readFile(path, "utf-8")
     return JSON.parse(text)
@@ -150,7 +150,7 @@ export async function loadBaselines(): Promise<ProblemBaselines | null> {
 
 export async function loadLeaderboard(
   file = process.env.KERNELBENCH_HARD_LEADERBOARD ??
-    "benchmarks/hard/results/leaderboard.json",
+    "benchmarks/amd/results/leaderboard.json",
 ): Promise<Leaderboard> {
   const path = join(REPO_ROOT, file)
   const text = await readFile(path, "utf-8")
@@ -158,7 +158,7 @@ export async function loadLeaderboard(
 }
 
 export async function loadAnnotations(
-  dir = "benchmarks/hard/results/annotations",
+  dir = "benchmarks/amd/results/annotations",
 ): Promise<Map<string, Annotation>> {
   const map = new Map<string, Annotation>()
   const full = join(REPO_ROOT, dir)

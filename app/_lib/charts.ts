@@ -14,6 +14,7 @@ const REPO_ROOT = process.cwd()
 // back to the raw model id if a key is missing so charts never silently drop
 // a published row (see AGENTS.md "Publishing results" → site charts).
 export const MODEL_NAMES: Record<string, string> = {
+  "manual": "Manual Kernel",
   "claude-opus-4-8": "Claude Opus 4.8",
   "claude-opus-5": "Claude Opus 5",
   "anthropic/claude-opus-5": "Claude Opus 5",
@@ -54,6 +55,7 @@ export function isRemovedModel(modelId: string): boolean {
 
 // GPU series colors — match the published charts (B200 is the NVIDIA accent).
 export const GPU_SERIES = [
+  { key: "MI325X", color: "#ED1C24" },
   { key: "RTX PRO 6000", color: "#4d9fff" },
   { key: "H100", color: "#b07cff" },
   { key: "B200", color: "#76b900" },
