@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" shape-rendering="geometricPrecision">
   <!-- three ascending columns — the product in one glyph -->
-  <rect x="6" y="36" width="14" height="22" rx="3" fill="#6366f1" opacity="0.45"/>
-  <rect x="25" y="24" width="14" height="34" rx="3" fill="#6366f1" opacity="0.75"/>
-  <rect x="44" y="8" width="14" height="50" rx="3" fill="#8b5cf6"/>
+  <rect x="6" y="36" width="14" height="22" rx="3" fill="#ed1c24" opacity="0.45"/>
+  <rect x="25" y="24" width="14" height="34" rx="3" fill="#ed1c24" opacity="0.75"/>
+  <rect x="44" y="8" width="14" height="50" rx="3" fill="#b91c1c"/>
 </svg>
