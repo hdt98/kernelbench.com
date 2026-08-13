@@ -150,7 +150,7 @@ export async function loadBaselines(): Promise<ProblemBaselines | null> {
 
 export async function loadLeaderboard(
   file = process.env.KERNELBENCH_HARD_LEADERBOARD ??
-    "benchmarks/amd/results/leaderboard.json",
+    "public/data/models.json",
 ): Promise<Leaderboard> {
   const path = join(REPO_ROOT, file)
   const text = await readFile(path, "utf-8")
