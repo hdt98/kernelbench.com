@@ -1,8 +1,12 @@
 """Segmented exponential-decay scan via Triton on AMD MI325X.
 
-The recurrence h_t = decay_t * h_{t-1} + x_t (with reset = decay becomes 0)
-is inherently sequential over T. We parallelize over B and D, and process
-T sequentially within each program using a runtime loop.
+Optimization: process 4 time steps per iteration to improve instruction-level
+parallelism and memory latency hiding. The loads for steps 1-3 are issued
+before the compute for step 0 finishes, allowing the GPU to overlap memory
+accesses with compute.
+
+Uses larger BLOCK_D (256) to reduce the number of programs and amortize
+launch overhead.
 """
 import torch
 import torch.nn as nn
@@ -32,22 +36,51 @@ def segmented_scan_kernel(
 
     h = tl.zeros((BLOCK_D,), dtype=tl.float32)
 
-    for t in range(T):
-        x_t = tl.load(
-            x_ptr + b * stride_xb + t * stride_xt + d_offs * stride_xd,
-            mask=d_mask, other=0.0,
-        ).to(tl.float32)
-        decay_t = tl.load(
-            decay_ptr + b * stride_db + t * stride_dt + d_offs * stride_dd,
-            mask=d_mask, other=0.0,
-        )
+    # Process 4 steps at a time for better ILP
+    T4 = (T // 4) * 4
+    for t in range(0, T4, 4):
+        # Load all 4 steps' data upfront
+        x0 = tl.load(x_ptr + b * stride_xb + t * stride_xt + d_offs * stride_xd, mask=d_mask, other=0.0).to(tl.float32)
+        x1 = tl.load(x_ptr + b * stride_xb + (t+1) * stride_xt + d_offs * stride_xd, mask=d_mask, other=0.0).to(tl.float32)
+        x2 = tl.load(x_ptr + b * stride_xb + (t+2) * stride_xt + d_offs * stride_xd, mask=d_mask, other=0.0).to(tl.float32)
+        x3 = tl.load(x_ptr + b * stride_xb + (t+3) * stride_xt + d_offs * stride_xd, mask=d_mask, other=0.0).to(tl.float32)
+
+        d0 = tl.load(decay_ptr + b * stride_db + t * stride_dt + d_offs * stride_dd, mask=d_mask, other=0.0)
+        d1 = tl.load(decay_ptr + b * stride_db + (t+1) * stride_dt + d_offs * stride_dd, mask=d_mask, other=0.0)
+        d2 = tl.load(decay_ptr + b * stride_db + (t+2) * stride_dt + d_offs * stride_dd, mask=d_mask, other=0.0)
+        d3 = tl.load(decay_ptr + b * stride_db + (t+3) * stride_dt + d_offs * stride_dd, mask=d_mask, other=0.0)
+
+        r0 = tl.load(resets_ptr + b * stride_rb + t * stride_rt)
+        r1 = tl.load(resets_ptr + b * stride_rb + (t+1) * stride_rt)
+        r2 = tl.load(resets_ptr + b * stride_rb + (t+2) * stride_rt)
+        r3 = tl.load(resets_ptr + b * stride_rb + (t+3) * stride_rt)
+
+        k0 = 1.0 - r0.to(tl.float32)
+        k1 = 1.0 - r1.to(tl.float32)
+        k2 = 1.0 - r2.to(tl.float32)
+        k3 = 1.0 - r3.to(tl.float32)
+
+        # Sequential compute
+        h = k0 * d0 * h + x0
+        tl.store(out_ptr + b * stride_ob + t * stride_ot + d_offs * stride_od, h.to(tl.bfloat16), mask=d_mask)
+
+        h = k1 * d1 * h + x1
+        tl.store(out_ptr + b * stride_ob + (t+1) * stride_ot + d_offs * stride_od, h.to(tl.bfloat16), mask=d_mask)
+
+        h = k2 * d2 * h + x2
+        tl.store(out_ptr + b * stride_ob + (t+2) * stride_ot + d_offs * stride_od, h.to(tl.bfloat16), mask=d_mask)
+
+        h = k3 * d3 * h + x3
+        tl.store(out_ptr + b * stride_ob + (t+3) * stride_ot + d_offs * stride_od, h.to(tl.bfloat16), mask=d_mask)
+
+    # Handle remaining steps
+    for t in range(T4, T):
+        x_t = tl.load(x_ptr + b * stride_xb + t * stride_xt + d_offs * stride_xd, mask=d_mask, other=0.0).to(tl.float32)
+        decay_t = tl.load(decay_ptr + b * stride_db + t * stride_dt + d_offs * stride_dd, mask=d_mask, other=0.0)
         reset_t = tl.load(resets_ptr + b * stride_rb + t * stride_rt)
         keep = 1.0 - reset_t.to(tl.float32)
         h = keep * decay_t * h + x_t
-        tl.store(
-            out_ptr + b * stride_ob + t * stride_ot + d_offs * stride_od,
-            h.to(tl.bfloat16), mask=d_mask,
-        )
+        tl.store(out_ptr + b * stride_ob + t * stride_ot + d_offs * stride_od, h.to(tl.bfloat16), mask=d_mask)
 
 
 class Model(nn.Module):
@@ -56,12 +89,10 @@ class Model(nn.Module):
         self.B, self.T, self.D = B, T, D
         self.register_buffer("_dummy", torch.zeros(1, dtype=torch.bfloat16))
 
-    def forward(
-        self, x: torch.Tensor, decay: torch.Tensor, resets: torch.Tensor
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, decay: torch.Tensor, resets: torch.Tensor) -> torch.Tensor:
         B, T, D = x.shape
         out = torch.empty_like(x)
-        BLOCK_D = 128
+        BLOCK_D = 256
         if D < BLOCK_D:
             BLOCK_D = triton.next_power_of_2(D)
         num_d_blocks = triton.cdiv(D, BLOCK_D)
@@ -73,7 +104,7 @@ class Model(nn.Module):
             resets.stride(0), resets.stride(1),
             out.stride(0), out.stride(1), out.stride(2),
             BLOCK_D=BLOCK_D,
-            num_warps=4,
+            num_warps=8,
         )
         return out
 

@@ -1,13 +1,16 @@
-"""MegaQwen decode solution — eager PyTorch matching reference numerics.
+"""MegaQwen decode — float32 matmuls with bmm GQA (avoids repeat_interleave).
 
-Same computation as reference (RMSNorm, QKV, RoPE, GQA attn, SwiGLU MLP)
-but structured as solution.py with p.data.zero_() init to avoid nn.init.normal_
-segfault on ROCm nightly.
+Same precision as reference (all float32), but uses batched matmul (bmm)
+for GQA attention instead of repeat_interleave + einsum, which avoids
+a large memory copy and is more efficient.
+
+The speedup comes from:
+1. No repeat_interleave (avoids copying K,V for each query head)
+2. bmm is optimized for batched matrix multiply
+3. Same float32 precision as reference — guaranteed correctness
 """
 from __future__ import annotations
-
 import math
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -37,11 +40,9 @@ def _rope(q, k, pos):
     t = torch.tensor([pos], device=q.device, dtype=torch.float32)
     freqs = torch.outer(t, inv)
     cos, sin = freqs.cos(), freqs.sin()
-
     def apply(x):
         x1, x2 = x[..., :half], x[..., half:]
         return torch.cat([x1 * cos - x2 * sin, x1 * sin + x2 * cos], dim=-1)
-
     return apply(q), apply(k)
 
 
@@ -78,24 +79,26 @@ class Block(nn.Module):
         v_cache = v_cache.clone()
         k_cache[:, position, :] = k.to(k_cache.dtype)
         v_cache[:, position, :] = v.to(v_cache.dtype)
-        k_all = k_cache[:, : position + 1, :].float()
-        v_all = v_cache[:, : position + 1, :].float()
+
+        # GQA via bmm — avoids repeat_interleave (same float32 precision)
+        k_all = k_cache[:, : position + 1, :].float()  # (NUM_KV, L, D)
+        v_all = v_cache[:, : position + 1, :].float()  # (NUM_KV, L, D)
         rep = NUM_Q // NUM_KV
-        k_all = k_all.repeat_interleave(rep, dim=0)
-        v_all = v_all.repeat_interleave(rep, dim=0)
+        q_grouped = q.view(NUM_KV, rep, HEAD_DIM)  # (NUM_KV, rep, D)
         scale = 1.0 / math.sqrt(HEAD_DIM)
-        scores = torch.einsum("hd,hld->hl", q, k_all) * scale
+        scores = torch.bmm(q_grouped, k_all.transpose(1, 2)) * scale  # (NUM_KV, rep, L)
         att = torch.softmax(scores, dim=-1)
-        attn_out = torch.einsum("hl,hld->hd", att, v_all).reshape(-1)
+        attn_out = torch.bmm(att, v_all).reshape(-1)  # (NUM_Q * D,)
+
         attn_out = attn_out @ self.o_proj.float().T
         h = residual + attn_out
         residual = h
         h = _rmsnorm(h, self.post_ln.float())
         gate = h @ self.gate_proj.float().T
         up = h @ self.up_proj.float().T
-        h = F.silu(gate) * up
-        h = h @ self.down_proj.float().T
-        y = residual + h
+        h2 = F.silu(gate) * up
+        h2 = h2 @ self.down_proj.float().T
+        y = residual + h2
         return y.to(torch.bfloat16), k_cache, v_cache
 
 
@@ -178,3 +181,4 @@ def get_init_inputs():
 
 def get_inputs():
     return []
+

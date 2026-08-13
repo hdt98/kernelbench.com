@@ -1,0 +1,93 @@
+"""Sort-free top-p (nucleus) mask via Triton binary-search on AMD MI325X.
+
+Same algorithm as before but with 25 binary search iterations instead of 60
+(sufficient for float32 precision — log2(1e6) ~= 20). This gives ~2.4x
+speedup over the 60-iteration version.
+"""
+import torch
+import torch.nn as nn
+import triton
+import triton.language as tl
+
+OP_TYPE = "topp_mask"
+SUPPORTED_PRECISIONS = ["fp32"]
+HARDWARE_REQUIRED = ["MI325X"]
+
+
+@triton.jit
+def topp_mask_kernel(
+    logits_ptr, mask_ptr,
+    V, P,
+    stride_b, stride_v,
+    BLOCK: tl.constexpr,
+):
+    row = tl.program_id(0)
+    offs = tl.arange(0, BLOCK)
+    valid = offs < V
+
+    logits = tl.load(
+        logits_ptr + row * stride_b + offs * stride_v,
+        mask=valid, other=float("-inf"),
+    )
+
+    max_logit = tl.max(logits, axis=0)
+    exp_vals = tl.exp(logits - max_logit)
+    sum_exp = tl.sum(exp_vals, axis=0)
+    probs = exp_vals / sum_exp
+
+    lo = 0.0
+    hi = tl.max(probs, axis=0)
+
+    for _ in range(25):
+        mid = (lo + hi) * 0.5
+        above = probs >= mid
+        mass = tl.sum(tl.where(above, probs, 0.0), axis=0)
+        cond = (mass >= P).to(tl.float32)
+        hi = hi * cond + mid * (1.0 - cond)
+        lo = lo * (1.0 - cond) + mid * cond
+
+    result = probs >= lo
+    tl.store(mask_ptr + row * stride_b + offs * stride_v, result, mask=valid)
+
+
+def topp_mask_nosort(logits: torch.Tensor, p: float) -> torch.Tensor:
+    B, V = logits.shape
+    mask = torch.empty(B, V, dtype=torch.bool, device=logits.device)
+    BLOCK = 1
+    while BLOCK < V:
+        BLOCK *= 2
+    topp_mask_kernel[(B,)](
+        logits, mask,
+        V, p,
+        logits.stride(0), logits.stride(1),
+        BLOCK=BLOCK,
+        num_warps=8,
+    )
+    max_idx = logits.argmax(dim=-1, keepdim=True)
+    mask.scatter_(-1, max_idx, True)
+    return mask
+
+
+class Model(nn.Module):
+    def __init__(self, B: int, V: int, P: float):
+        super().__init__()
+        self.B, self.V, self.P = B, V, P
+        self.register_buffer("_dummy", torch.zeros(1, dtype=torch.float32))
+
+    def forward(self, logits: torch.Tensor) -> torch.Tensor:
+        return topp_mask_nosort(logits, self.P)
+
+
+B = 1
+V = 151936
+P = 0.9
+
+
+def get_inputs():
+    logits = torch.randn(B, V, dtype=torch.float32) * 3.0
+    return [logits]
+
+
+def get_init_inputs():
+    return [B, V, P]
+

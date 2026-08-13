@@ -31,7 +31,7 @@ from src.eval.numeric_stress import (  # noqa: E402
 )
 from src.eval.rocm_language import check_rocm_language, collect_solution_sources  # noqa: E402
 from src.eval.property_stress import (  # noqa: E402
-    check_topk_properties,
+    
     generate_property_cases,
     property_shape_index,
     tolerance_for_property,

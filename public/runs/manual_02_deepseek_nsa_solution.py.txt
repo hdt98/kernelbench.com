@@ -1,9 +1,11 @@
-"""NSA-style sparse attention for AMD MI325X — bf16 matmuls, block-sparse.
+"""NSA-style sparse attention for AMD MI325X — chunked to avoid full S×S matrix.
 
-Key improvements:
-1. bf16 matmuls (not float32) — 4x peak compute on gfx942
-2. Block-sparse attention: only compute scores for selected blocks + sliding window
-3. Avoid materializing full S×S score matrix for importance scoring
+Key optimization: process the query dimension in chunks of 512, so the peak
+score matrix is (B, H, chunk, S) instead of (B, H, S, S). This reduces memory
+traffic by ~S/chunk factor and improves L2 cache utilization.
+
+Block importance is computed using compressed Q (mean per block) × K^T, which
+is O(n_blocks * S * D) instead of O(S^2 * D).
 """
 from __future__ import annotations
 import math
@@ -26,61 +28,94 @@ def nsa_attend(q, k, v, block_size=BLOCK_SIZE, top_n_blocks=TOP_N_BLOCKS, slidin
     scale = 1.0 / math.sqrt(D)
     n_blocks = (S + block_size - 1) // block_size
 
-    # Compute block importance scores using bf16 matmul
-    # scores: (B, H, S, S) — need this for both importance and final attention
-    # But we can compute block sums more efficiently
-
-    # Full score matrix in bf16
-    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-        scores = torch.matmul(q, k.transpose(-1, -2)) * scale
-
-    # Causal mask
-    k_pos = torch.arange(S, device=q.device)
-    q_pos = torch.arange(S, device=q.device)
-    causal = k_pos[None, :] <= q_pos[:, None]
-    scores = scores.masked_fill(~causal[None, None, :, :], float("-inf"))
-
-    # Block importance: average score per block
+    # Pad to multiple of block_size
     pad = n_blocks * block_size - S
     if pad > 0:
-        sp = F.pad(scores, (0, pad), value=float("-inf"))
+        q_pad = F.pad(q, (0, 0, 0, pad), value=0.0)
+        k_pad = F.pad(k, (0, 0, 0, pad), value=0.0)
+        v_pad = F.pad(v, (0, 0, 0, pad), value=0.0)
     else:
-        sp = scores
-    sp = sp.view(B, H, S, n_blocks, block_size)
-    valid = sp > float("-1e8")
-    bsum = sp.sum(dim=-1)
-    bcnt = valid.sum(dim=-1).float().clamp(min=1.0)
-    bimp = bsum / bcnt
-    bimp = bimp.masked_fill(bcnt == 0, float("-1e9"))
+        q_pad, k_pad, v_pad = q, k, v
+    S_pad = S + pad
 
-    # Select top-n blocks
-    n_sel = min(top_n_blocks, n_blocks)
-    _, topk_idx = torch.topk(bimp.float(), n_sel, dim=-1)
-
-    # Build selection mask
-    sel = torch.zeros(B, H, S, S, device=q.device, dtype=torch.bool)
-    k_exp = k_pos.view(1, 1, 1, S)
-    for bi in range(n_sel):
-        blk = topk_idx[..., bi]
-        s0 = blk * block_size
-        s1 = torch.clamp((blk + 1) * block_size, max=S)
-        sel |= (k_exp >= s0[..., None]) & (k_exp < s1[..., None])
-
-    # Sliding window
-    w0 = torch.clamp(q_pos + 1 - sliding_window, min=0)
-    sw = (k_pos[None, :] >= w0[:, None]) & (k_pos[None, :] <= q_pos[:, None])
-    sel |= sw[None, None, :, :].expand(B, H, S, S)
-    sel &= causal[None, None, :, :].expand(B, H, S, S)
-
-    # Sparse attention — only on selected positions
-    scores_sel = scores.masked_fill(~sel, float("-inf"))
-
-    # Softmax in float32 for stability, then matmul in bf16
-    att = torch.softmax(scores_sel.float(), dim=-1).to(torch.bfloat16)
+    # Block importance: mean Q per block × K^T
+    q_blocks = q_pad.view(B, H, n_blocks, block_size, D).mean(dim=3)  # (B, H, n_blocks, D)
     with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-        out = torch.matmul(att, v)
+        block_scores = torch.matmul(q_blocks, k_pad.transpose(-1, -2)) * scale  # (B, H, n_blocks, S_pad)
 
-    return out
+    # Reshape and compute per-key-block importance
+    block_scores = block_scores.view(B, H, n_blocks, n_blocks, block_size)
+    # Causal mask at block level
+    block_idx = torch.arange(n_blocks, device=q.device)
+    block_causal = block_idx[None, :] <= block_idx[:, None]
+    block_scores = block_scores.masked_fill(~block_causal[None, None, :, :, None], 0.0)
+    bimp = block_scores.sum(dim=(2, 4))  # (B, H, n_blocks)
+
+    # Select top-n blocks (torch.topk is allowed for this problem)
+    n_sel = min(top_n_blocks, n_blocks)
+    _, topk_idx = torch.topk(bimp.float(), n_sel, dim=-1)  # (B, H, n_sel)
+
+    # Build selection mask per (B, H) — which key blocks are selected
+    # selected_blocks: (B, H, n_blocks) bool
+    selected_blocks = torch.zeros(B, H, n_blocks, dtype=torch.bool, device=q.device)
+    selected_blocks.scatter_(2, topk_idx, True)
+
+    # Add sliding window blocks (always include the last few blocks)
+    # For each query position, the sliding window covers the last 'sliding_window' tokens
+    # In block terms, this means the last ceil(sliding_window / block_size) blocks
+    n_sliding_blocks = max(1, (sliding_window + block_size - 1) // block_size)
+
+    # Chunked attention: process query in chunks to avoid full S×S matrix
+    chunk = min(512, S)
+    out = torch.zeros(B, H, S, D, dtype=torch.float32, device=q.device)
+
+    k_pos = torch.arange(S, device=q.device)
+    q_pos = torch.arange(S, device=q.device)
+    causal = k_pos[None, :] <= q_pos[:, None]  # (S, S)
+
+    # Pre-compute which key positions are selected
+    # key_block_idx: (S,) — which block each key position belongs to
+    key_block_idx = k_pos // block_size  # (S,)
+
+    for qi in range(0, S, chunk):
+        q_end = min(qi + chunk, S)
+        q_chunk = q[:, :, qi:q_end]  # (B, H, chunk, D)
+        q_pos_chunk = q_pos[qi:q_end]  # (chunk,)
+
+        # Compute scores for this chunk: (B, H, chunk, S)
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            scores = torch.matmul(q_chunk, k.transpose(-1, -2)) * scale
+
+        # Causal mask
+        causal_chunk = causal[qi:q_end, :]  # (chunk, S)
+        scores = scores.masked_fill(~causal_chunk[None, None, :, :], float("-inf"))
+
+        # Block selection mask: for each query, select key positions in selected blocks
+        # For each (b, h), the selected blocks are in selected_blocks[b, h]
+        # Build mask: (B, H, chunk, S) where True = selected
+        # key_block_idx: (S,) → expand to (1, 1, 1, S)
+        # selected_blocks: (B, H, n_blocks) → gather
+        sel_mask = selected_blocks[:, :, :][..., key_block_idx]  # (B, H, S)
+        sel_mask = sel_mask[:, :, None, :].expand(B, H, q_end - qi, S)
+
+        # Sliding window mask: for each query, include keys in [q-w+1, q]
+        w0 = torch.clamp(q_pos_chunk + 1 - sliding_window, min=0)  # (chunk,)
+        sw_mask = (k_pos[None, :] >= w0[:, None]) & (k_pos[None, :] <= q_pos_chunk[:, None])  # (chunk, S)
+
+        # Combined mask
+        mask = sel_mask | sw_mask[None, None, :, :]
+        mask = mask & causal_chunk[None, None, :, :]
+
+        scores = scores.masked_fill(~mask, float("-inf"))
+
+        # Softmax in float32
+        att = torch.softmax(scores.float(), dim=-1).to(torch.bfloat16)
+
+        # Attention output
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            out[:, :, qi:q_end] = torch.matmul(att, v).float()
+
+    return out.to(torch.bfloat16)
 
 
 class Model(nn.Module):
@@ -97,9 +132,9 @@ class Model(nn.Module):
 def get_init_inputs():
     return [B, H, S, D]
 
-
 def get_inputs():
     q = torch.randn(B, H, S, D, dtype=torch.bfloat16)
     k = torch.randn(B, H, S, D, dtype=torch.bfloat16)
     v = torch.randn(B, H, S, D, dtype=torch.bfloat16)
     return [q, k, v]
+

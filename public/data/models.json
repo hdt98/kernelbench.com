@@ -43,7 +43,7 @@
           "run_id": "manual_topk",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0017,
+          "peak_fraction": 0.0032,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_topk_solution.py.txt"
@@ -97,7 +97,7 @@
           "run_id": "manual_01_glm52_fused_moe",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0087,
+          "peak_fraction": 0.0096,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_01_glm52_fused_moe_solution.py.txt"
@@ -106,7 +106,7 @@
           "run_id": "manual_02_deepseek_nsa",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0031,
+          "peak_fraction": 0.0089,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_02_deepseek_nsa_solution.py.txt"
@@ -115,7 +115,7 @@
           "run_id": "manual_02_segmented_decay_scan",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0159,
+          "peak_fraction": 0.0376,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_02_segmented_decay_scan_solution.py.txt"
@@ -124,7 +124,7 @@
           "run_id": "manual_03_megaqwen_decode",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0078,
+          "peak_fraction": 0.0085,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_03_megaqwen_decode_solution.py.txt"
@@ -133,7 +133,7 @@
           "run_id": "manual_topp_mask",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0012,
+          "peak_fraction": 0.0019,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_topp_mask_solution.py.txt"

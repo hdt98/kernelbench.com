@@ -1,0 +1,172 @@
+"""TopK via Triton for small n, iterative torch.max for large n — AMD MI325X.
+
+For small n (<= 8192): single Triton kernel, one program per row, iterative
+max selection with masking. The entire row fits in registers.
+
+For large n (> 8192): chunked Triton kernel. Split the row into chunks of
+CHUNK_SIZE, each program finds local top-k within its chunk, then a merge
+kernel combines all chunk results. This avoids the register spill that kills
+the single-program approach for n=131072.
+
+torch.max is NOT in the forbidden ops list, so we use it as a fallback.
+"""
+import torch
+import torch.nn as nn
+import triton
+import triton.language as tl
+
+
+@triton.jit
+def topk_small_kernel(x_ptr, val_ptr, idx_ptr, N, K: tl.constexpr,
+                      BLOCK: tl.constexpr):
+    """Triton top-k kernel for small n: one program per row."""
+    row = tl.program_id(0)
+    offs = tl.arange(0, BLOCK)
+    mask = offs < N
+    x = tl.load(x_ptr + row * N + offs, mask=mask, other=-float("inf"))
+
+    if K == 1:
+        max_val = tl.max(x, axis=0)
+        max_idx = tl.argmax(x, axis=0)
+        tl.store(val_ptr + row, max_val)
+        tl.store(idx_ptr + row, max_idx.to(tl.int64))
+        return
+
+    for i in range(K):
+        max_val = tl.max(x, axis=0)
+        max_idx = tl.argmax(x, axis=0)
+        tl.store(val_ptr + row * K + i, max_val)
+        tl.store(idx_ptr + row * K + i, max_idx.to(tl.int64))
+        x = tl.where(offs == max_idx, -float("inf"), x)
+
+
+@triton.jit
+def topk_chunk_kernel(x_ptr, val_ptr, idx_ptr,
+                      N, K: tl.constexpr,
+                      CHUNK: tl.constexpr,
+                      n_chunks: tl.constexpr):
+    """Chunked top-k: one program per (row, chunk). Finds local top-k per chunk."""
+    row = tl.program_id(0)
+    chunk = tl.program_id(1)
+
+    chunk_start = chunk * CHUNK
+    offs = tl.arange(0, CHUNK)
+    mask = (offs + chunk_start) < N
+    x = tl.load(x_ptr + row * N + chunk_start + offs, mask=mask, other=-float("inf"))
+
+    # Find top-K in this chunk iteratively
+    for i in range(K):
+        max_val = tl.max(x, axis=0)
+        max_idx = tl.argmax(x, axis=0)
+        # Store with global index
+        tl.store(val_ptr + row * n_chunks * K + chunk * K + i, max_val)
+        tl.store(idx_ptr + row * n_chunks * K + chunk * K + i,
+                 (max_idx + chunk_start).to(tl.int64))
+        x = tl.where(offs == max_idx, -float("inf"), x)
+
+
+@triton.jit
+def topk_merge_kernel(val_ptr, idx_ptr, out_val_ptr, out_idx_ptr,
+                      K: tl.constexpr,
+                      n_chunks: tl.constexpr,
+                      MERGE_BLOCK: tl.constexpr):
+    """Merge per-chunk top-k results into final top-k. One program per row."""
+    row = tl.program_id(0)
+    offs = tl.arange(0, MERGE_BLOCK)
+    mask = offs < (n_chunks * K)
+    vals = tl.load(val_ptr + row * n_chunks * K + offs, mask=mask, other=-float("inf"))
+    idxs = tl.load(idx_ptr + row * n_chunks * K + offs, mask=mask, other=0)
+
+    for i in range(K):
+        max_val = tl.max(vals, axis=0)
+        max_idx = tl.argmax(vals, axis=0)
+        tl.store(out_val_ptr + row * K + i, max_val)
+        tl.store(out_idx_ptr + row * K + i,
+                 tl.load(idx_ptr + row * n_chunks * K + max_idx).to(tl.int64))
+        vals = tl.where(offs == max_idx, -float("inf"), vals)
+
+
+class Model(nn.Module):
+    """Top-k over the last dim of a 2D tensor."""
+
+    def __init__(self, batch: int, n: int, k: int):
+        super().__init__()
+        self.batch, self.n, self.k = batch, n, k
+        self.register_buffer("_dummy", torch.zeros(1))
+
+    def forward(self, x: torch.Tensor):
+        batch, n = x.shape
+        k = self.k
+
+        if k == 1:
+            # Fast path: argmax
+            block = 1
+            while block < n:
+                block *= 2
+            if block <= 131072:
+                values = torch.empty(batch, 1, dtype=torch.float32, device=x.device)
+                indices = torch.empty(batch, 1, dtype=torch.int64, device=x.device)
+                topk_small_kernel[(batch,)](
+                    x, values, indices, n, K=1, BLOCK=block,
+                    num_warps=4 if block <= 8192 else 8,
+                )
+                return values, indices
+
+        if n <= 8192:
+            # Small n: single Triton kernel
+            block = 1
+            while block < n:
+                block *= 2
+            values = torch.empty(batch, k, dtype=torch.float32, device=x.device)
+            indices = torch.empty(batch, k, dtype=torch.int64, device=x.device)
+            topk_small_kernel[(batch,)](
+                x, values, indices, n, K=k, BLOCK=block,
+                num_warps=4,
+            )
+            return values, indices
+
+        # Large n: chunked approach
+        CHUNK = 4096
+        n_chunks = (n + CHUNK - 1) // CHUNK
+        chunk_block = 1
+        while chunk_block < CHUNK:
+            chunk_block *= 2
+
+        # Phase 1: find local top-k per chunk
+        chunk_vals = torch.empty(batch, n_chunks * k, dtype=torch.float32, device=x.device)
+        chunk_idxs = torch.empty(batch, n_chunks * k, dtype=torch.int64, device=x.device)
+        topk_chunk_kernel[(batch, n_chunks)](
+            x, chunk_vals, chunk_idxs, n, K=k, CHUNK=chunk_block,
+            n_chunks=n_chunks,
+            num_warps=4,
+        )
+
+        # Phase 2: merge
+        merge_size = n_chunks * k
+        merge_block = 1
+        while merge_block < merge_size:
+            merge_block *= 2
+
+        values = torch.empty(batch, k, dtype=torch.float32, device=x.device)
+        indices = torch.empty(batch, k, dtype=torch.int64, device=x.device)
+        topk_merge_kernel[(batch,)](
+            chunk_vals, chunk_idxs, values, indices,
+            K=k, n_chunks=n_chunks, MERGE_BLOCK=merge_block,
+            num_warps=4 if merge_block <= 8192 else 8,
+        )
+        return values, indices
+
+
+batch = 64
+n = 8192
+k = 8
+
+
+def get_inputs():
+    x = torch.randn(batch, n, dtype=torch.float32)
+    return [x]
+
+
+def get_init_inputs():
+    return [batch, n, k]
+
