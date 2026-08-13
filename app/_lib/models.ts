@@ -1014,7 +1014,7 @@ export function columnsForBench(
       ? (gpuLabels.rtxpro6000 ?? "RTX PRO 6000")
       : (gpuLabels[gpu] ?? gpu)
   return {
-    title: `KernelBench ${label}`,
+    title: `Nexus KernelBench ${label}`,
     subtitle:
       bench === "mega"
         ? `best decode speedup vs optimized-PyTorch baseline over valid (correct + audited-clean) cells · ${displayGpu}`

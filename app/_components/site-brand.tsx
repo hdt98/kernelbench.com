@@ -1,4 +1,4 @@
-// KernelBench-aligned header: sticky, backdrop-blur, clean zinc palette.
+// Nexus KernelBench header: sticky, backdrop-blur, clean zinc palette.
 
 export function SiteBrand() {
   return (
@@ -12,7 +12,7 @@ export function SiteBrand() {
               <rect x="11" y="1.5" width="3.5" height="13.5" rx="0.8" fill="currentColor" />
             </svg>
           </span>
-          <span>kernelbench</span>
+          <span>nexuskernel</span>
           <span className="text-zinc-400">.com</span>
         </a>
         <div className="hidden items-center gap-7 md:flex">

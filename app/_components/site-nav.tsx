@@ -28,7 +28,7 @@ function Wordmark() {
         <rect x="7.75" y="6.5" width="4.5" height="12.5" rx="1" opacity="0.75" />
         <rect x="14" y="2" width="4.5" height="17" rx="1" />
       </svg>
-      <span className="nav-word">kernelbench</span>
+      <span className="nav-word">nexuskernel</span>
       <span className="nav-tld">.com</span>
     </Link>
   )

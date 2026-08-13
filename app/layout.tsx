@@ -21,8 +21,8 @@ export const metadata: Metadata = {
   title: "nexuskernel.com: AMD GPU Kernel Benchmark Results",
   description:
     "AMD Instinct GPU kernel benchmark results on MI325X (gfx942). Genuine Triton and HIP kernels.",
-  authors: [{ name: "Elliot Arledge", url: "https://elliotarledge.com" }],
-  creator: "Elliot Arledge",
+  authors: [{ name: "One Mount Group", url: "https://onenexus-do.cloud" }],
+  creator: "One Mount Group",
   publisher: "nexuskernel.com",
   keywords: [
     "GPU kernels",
@@ -30,8 +30,8 @@ export const metadata: Metadata = {
     "HIP",
     "Triton",
     "benchmark",
-    "coding agents",
-    "LLM evaluation",
+    "AMD",
+    "MI325X",
   ],
   openGraph: {
     title: "nexuskernel.com: AMD GPU Kernel Benchmark Results",
@@ -43,12 +43,12 @@ export const metadata: Metadata = {
   other: {
     citation_title:
       "nexuskernel.com: AMD GPU Kernel Benchmark Results",
-    citation_author: "Elliot Arledge",
+    citation_author: "One Mount Group",
     citation_publication_date: "2026",
     citation_online_date: "2026",
     citation_fulltext_html_url: "https://nexuskernel.com",
     citation_keywords:
-      "GPU kernels; ROCm; HIP; Triton; coding agents; LLM evaluation; benchmark",
+      "GPU kernels; ROCm; HIP; Triton; AMD; MI325X; benchmark",
   },
 }
 
@@ -78,12 +78,12 @@ function Footer() {
     <footer className="site-footer">
       <div className="site-footer-inner">
         <span className="site-footer-line">
-          built by <a href="https://elliotarledge.com">elliot arledge</a>
+          built by <a href="https://onenexus-do.cloud">One Mount Group</a>
           {" · "}
           <a href="https://github.com/hdt98/kernelbench.com">source</a>
         </span>
         <span className="site-footer-dim">
-          independent site — not affiliated with Stanford KernelBench
+          independent AMD GPU kernel benchmark site
         </span>
       </div>
     </footer>
