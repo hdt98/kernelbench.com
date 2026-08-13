@@ -165,60 +165,36 @@
     "01_fp8_gemm": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.1073,
-      "best_model": "manual",
+      "best_peak_fraction": 0.1075,
+      "best_model": "glm-5.2",
       "ranked_passes": [
         {
-          "model": "manual",
-          "peak_fraction": 0.1073
+          "model": "glm-5.2",
+          "peak_fraction": 0.1075
         }
       ]
     },
-    "05_topk_bitonic": {
+    "01_dequant_gemv": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0017,
-      "best_model": "manual",
+      "best_peak_fraction": 0.017,
+      "best_model": "glm-5.2",
       "ranked_passes": [
         {
-          "model": "manual",
-          "peak_fraction": 0.0017
+          "model": "glm-5.2",
+          "peak_fraction": 0.017
         }
       ]
     },
-    "03_paged_attention": {
+    "01_glm52_fused_moe": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0143,
-      "best_model": "manual",
+      "best_peak_fraction": 0.0096,
+      "best_model": "glm-5.2",
       "ranked_passes": [
         {
-          "model": "manual",
-          "peak_fraction": 0.0143
-        }
-      ]
-    },
-    "07_w4a16_gemm": {
-      "n_attempted": 1,
-      "n_passed": 1,
-      "best_peak_fraction": 0.01,
-      "best_model": "manual",
-      "ranked_passes": [
-        {
-          "model": "manual",
-          "peak_fraction": 0.01
-        }
-      ]
-    },
-    "06_sonic_moe_swiglu": {
-      "n_attempted": 1,
-      "n_passed": 1,
-      "best_peak_fraction": 0.0216,
-      "best_model": "manual",
-      "ranked_passes": [
-        {
-          "model": "manual",
-          "peak_fraction": 0.0216
+          "model": "glm-5.2",
+          "peak_fraction": 0.0096
         }
       ]
     },
@@ -226,95 +202,83 @@
       "n_attempted": 1,
       "n_passed": 1,
       "best_peak_fraction": 0.0,
-      "best_model": "manual",
+      "best_model": "glm-5.2",
       "ranked_passes": [
         {
-          "model": "manual",
+          "model": "glm-5.2",
           "peak_fraction": 0.0
-        }
-      ]
-    },
-    "01_dequant_gemv": {
-      "n_attempted": 1,
-      "n_passed": 1,
-      "best_peak_fraction": 0.0068,
-      "best_model": "manual",
-      "ranked_passes": [
-        {
-          "model": "manual",
-          "peak_fraction": 0.0068
-        }
-      ]
-    },
-    "01_glm52_fused_moe": {
-      "n_attempted": 1,
-      "n_passed": 1,
-      "best_peak_fraction": 0.0045,
-      "best_model": "manual",
-      "ranked_passes": [
-        {
-          "model": "manual",
-          "peak_fraction": 0.0045
         }
       ]
     },
     "02_deepseek_nsa": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0028,
-      "best_model": "manual",
+      "best_peak_fraction": 0.0089,
+      "best_model": "glm-5.2",
       "ranked_passes": [
         {
-          "model": "manual",
-          "peak_fraction": 0.0028
+          "model": "glm-5.2",
+          "peak_fraction": 0.0089
         }
       ]
     },
     "02_segmented_decay_scan": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0159,
-      "best_model": "manual",
+      "best_peak_fraction": 0.0376,
+      "best_model": "glm-5.2",
       "ranked_passes": [
         {
-          "model": "manual",
-          "peak_fraction": 0.0159
+          "model": "glm-5.2",
+          "peak_fraction": 0.0376
         }
       ]
     },
     "03_megaqwen_decode": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0078,
-      "best_model": "manual",
+      "best_peak_fraction": 0.0085,
+      "best_model": "glm-5.2",
       "ranked_passes": [
         {
-          "model": "manual",
-          "peak_fraction": 0.0078
+          "model": "glm-5.2",
+          "peak_fraction": 0.0085
+        }
+      ]
+    },
+    "03_paged_attention": {
+      "n_attempted": 1,
+      "n_passed": 1,
+      "best_peak_fraction": 0.0143,
+      "best_model": "glm-5.2",
+      "ranked_passes": [
+        {
+          "model": "glm-5.2",
+          "peak_fraction": 0.0143
         }
       ]
     },
     "03_topp_mask": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0012,
-      "best_model": "manual",
+      "best_peak_fraction": 0.0019,
+      "best_model": "glm-5.2",
       "ranked_passes": [
         {
-          "model": "manual",
-          "peak_fraction": 0.0012
+          "model": "glm-5.2",
+          "peak_fraction": 0.0019
         }
       ]
     },
     "04_flash_attention": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.063,
-      "best_model": "manual",
+      "best_peak_fraction": 0.128,
+      "best_model": "glm-5.2",
       "ranked_passes": [
         {
-          "model": "manual",
-          "peak_fraction": 0.063
+          "model": "glm-5.2",
+          "peak_fraction": 0.128
         }
       ]
     },
@@ -322,11 +286,47 @@
       "n_attempted": 1,
       "n_passed": 1,
       "best_peak_fraction": 0.0967,
-      "best_model": "manual",
+      "best_model": "glm-5.2",
       "ranked_passes": [
         {
-          "model": "manual",
+          "model": "glm-5.2",
           "peak_fraction": 0.0967
+        }
+      ]
+    },
+    "05_topk_bitonic": {
+      "n_attempted": 1,
+      "n_passed": 1,
+      "best_peak_fraction": 0.0032,
+      "best_model": "glm-5.2",
+      "ranked_passes": [
+        {
+          "model": "glm-5.2",
+          "peak_fraction": 0.0032
+        }
+      ]
+    },
+    "06_sonic_moe_swiglu": {
+      "n_attempted": 1,
+      "n_passed": 1,
+      "best_peak_fraction": 0.054,
+      "best_model": "glm-5.2",
+      "ranked_passes": [
+        {
+          "model": "glm-5.2",
+          "peak_fraction": 0.054
+        }
+      ]
+    },
+    "07_w4a16_gemm": {
+      "n_attempted": 1,
+      "n_passed": 1,
+      "best_peak_fraction": 0.0174,
+      "best_model": "glm-5.2",
+      "ranked_passes": [
+        {
+          "model": "glm-5.2",
+          "peak_fraction": 0.0174
         }
       ]
     }
