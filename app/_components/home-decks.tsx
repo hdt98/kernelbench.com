@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react"
 import type { ProblemChip, ReportRow, ReportView } from "../_lib/models"
 import { problemLabel } from "../_lib/models"
 
-// Homepage: stacked Nexus KernelBench sections. Each score is a mini bar vs the
+// Homepage: stacked KernelBench sections. Each score is a mini bar vs the
 // best result on that problem (100% = winner).
 // Desktop: model × problem matrix.
 // Mobile multi-problem: per-problem leaderboards (best → worst).
@@ -310,7 +310,7 @@ function DeckPanel({ deck }: { deck: HomeDeck }) {
         style={{ ["--deck-accent" as string]: deck.accent }}
       >
         <div className="hd-section-label">
-          <span className="hd-k">Nexus KernelBench</span>
+          <span className="hd-k">KernelBench</span>
           <span className="hd-name">{deck.title}</span>
           <span className="hd-soon">soon</span>
         </div>
@@ -338,7 +338,7 @@ function DeckPanel({ deck }: { deck: HomeDeck }) {
     >
       <div className="hd-section-label">
         <div className="hd-section-title">
-          <span className="hd-k">Nexus KernelBench</span>
+          <span className="hd-k">KernelBench</span>
           <span className="hd-name">{deck.title}</span>
         </div>
         {deck.gpus.length > 1 && (
