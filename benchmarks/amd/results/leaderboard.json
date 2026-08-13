@@ -12,7 +12,8 @@
     "03_paged_attention",
     "05_topk_bitonic",
     "06_sonic_moe_swiglu",
-    "07_w4a16_gemm"
+    "07_w4a16_gemm",
+    "02_kda_cutlass"
   ],
   "models": [
     {
@@ -49,7 +50,7 @@
           "run_id": "manual_w4a16",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0100,
+          "peak_fraction": 0.01,
           "failure_reason": null,
           "retryable_infra_failure": false
         },
@@ -60,10 +61,18 @@
           "peak_fraction": null,
           "failure_reason": "pending GPU verification",
           "retryable_infra_failure": true
+        },
+        "02_kda_cutlass": {
+          "run_id": "manual_kda",
+          "correct": true,
+          "has_solution": true,
+          "peak_fraction": null,
+          "failure_reason": null,
+          "retryable_infra_failure": false
         }
       },
-      "pass_count": 4,
-      "total_runs": 5
+      "pass_count": 5,
+      "total_runs": 6
     }
   ],
   "per_problem": {
@@ -72,34 +81,61 @@
       "n_passed": 1,
       "best_peak_fraction": 0.1065,
       "best_model": "manual",
-      "ranked_passes": [{"model": "manual", "peak_fraction": 0.1065}]
+      "ranked_passes": [
+        {
+          "model": "manual",
+          "peak_fraction": 0.1065
+        }
+      ]
     },
     "05_topk_bitonic": {
       "n_attempted": 1,
       "n_passed": 1,
       "best_peak_fraction": 0.0017,
       "best_model": "manual",
-      "ranked_passes": [{"model": "manual", "peak_fraction": 0.0017}]
+      "ranked_passes": [
+        {
+          "model": "manual",
+          "peak_fraction": 0.0017
+        }
+      ]
     },
     "03_paged_attention": {
       "n_attempted": 1,
       "n_passed": 1,
       "best_peak_fraction": 0.0058,
       "best_model": "manual",
-      "ranked_passes": [{"model": "manual", "peak_fraction": 0.0058}]
+      "ranked_passes": [
+        {
+          "model": "manual",
+          "peak_fraction": 0.0058
+        }
+      ]
     },
     "07_w4a16_gemm": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0100,
+      "best_peak_fraction": 0.01,
       "best_model": "manual",
-      "ranked_passes": [{"model": "manual", "peak_fraction": 0.0100}]
+      "ranked_passes": [
+        {
+          "model": "manual",
+          "peak_fraction": 0.01
+        }
+      ]
     },
     "06_sonic_moe_swiglu": {
       "n_attempted": 1,
       "n_passed": 0,
       "best_peak_fraction": null,
       "best_model": null,
+      "ranked_passes": []
+    },
+    "02_kda_cutlass": {
+      "n_attempted": 1,
+      "n_passed": 1,
+      "best_peak_fraction": null,
+      "best_model": "manual",
       "ranked_passes": []
     }
   }
