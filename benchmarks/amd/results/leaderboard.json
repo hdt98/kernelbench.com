@@ -34,7 +34,7 @@
           "run_id": "manual_fp8_gemm",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.1073,
+          "peak_fraction": 0.1075,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_fp8_gemm_solution.py.txt"
@@ -61,7 +61,7 @@
           "run_id": "manual_w4a16",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.01,
+          "peak_fraction": 0.0174,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_w4a16_solution.py.txt"
@@ -70,7 +70,7 @@
           "run_id": "manual_sonic_moe",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0216,
+          "peak_fraction": 0.054,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_sonic_moe_solution.py.txt"
@@ -88,7 +88,7 @@
           "run_id": "manual_01_dequant_gemv",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0068,
+          "peak_fraction": 0.017,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_01_dequant_gemv_solution.py.txt"
@@ -97,7 +97,7 @@
           "run_id": "manual_01_glm52_fused_moe",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0045,
+          "peak_fraction": 0.0087,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_01_glm52_fused_moe_solution.py.txt"
@@ -106,7 +106,7 @@
           "run_id": "manual_02_deepseek_nsa",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0028,
+          "peak_fraction": 0.0031,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_02_deepseek_nsa_solution.py.txt"
@@ -142,7 +142,7 @@
           "run_id": "manual_flash_attn",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.063,
+          "peak_fraction": 0.0943,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_flash_attn_solution.py.txt"

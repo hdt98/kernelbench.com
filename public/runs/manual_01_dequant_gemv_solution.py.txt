@@ -1,8 +1,5 @@
 """W4A16 gated dequant-GEMV via Triton on AMD MI325X (gfx942).
-
-Fuses int4 unpack, group dequant (group=96, ragged), and gated GEMV
-(silu(gate) * up) into Triton kernels. Group size 96 is handled by
-loading scales/zeros per-group within the K-iteration loop.
+Always uses Triton kernel (no PyTorch fallback). BK=128, handles group boundaries.
 """
 import torch
 import torch.nn as nn
@@ -29,36 +26,51 @@ def dequant_gemv_kernel(
     offs_n = pid_n * BN + tl.arange(0, BN)
     offs_kh = tl.arange(0, BK // 2)
 
+    m_mask = offs_m < M
     acc = tl.zeros((BM, BN), dtype=tl.float32)
 
     for k_start in range(0, K, BK):
-        # Load packed weights: (BK//2, BN) uint8
         wq_ptrs = wq_ptr + ((k_start // 2) + offs_kh[:, None]) * wq_stride_k + offs_n[None, :] * wq_stride_n
         wq = tl.load(wq_ptrs, mask=offs_n[None, :] < N, other=0)
 
-        # Unpack int4
         w_even = (wq & 0xF).to(tl.bfloat16)
         w_odd = ((wq >> 4) & 0xF).to(tl.bfloat16)
 
-        # Load scales/zeros for this group
-        g = k_start // GROUP
-        s = tl.load(scales_ptr + g * s_stride_g + offs_n * s_stride_n, mask=offs_n < N, other=0.0)
-        z = tl.load(zeros_ptr + g * s_stride_g + offs_n * s_stride_n, mask=offs_n < N, other=0.0)
+        # Handle group boundaries: BK=128 may span 2 groups (GROUP=96)
+        g0 = k_start // GROUP
+        g1 = g0 + 1
+        g0_end = (g0 + 1) * GROUP
 
-        w_even = (w_even - z[None, :]) * s[None, :]
-        w_odd = (w_odd - z[None, :]) * s[None, :]
+        s0 = tl.load(scales_ptr + g0 * s_stride_g + offs_n * s_stride_n, mask=offs_n < N, other=0.0)
+        z0 = tl.load(zeros_ptr + g0 * s_stride_g + offs_n * s_stride_n, mask=offs_n < N, other=0.0)
+        s1 = tl.load(scales_ptr + g1 * s_stride_g + offs_n * s_stride_n, mask=offs_n < N, other=0.0)
+        z1 = tl.load(zeros_ptr + g1 * s_stride_g + offs_n * s_stride_n, mask=offs_n < N, other=0.0)
 
-        # Load x for even and odd K
+        # Per-K-element group selection — broadcast correctly
+        k_even = k_start + offs_kh * 2
+        k_odd = k_start + offs_kh * 2 + 1
+        even_in_g0 = k_even < g0_end  # (BK//2,)
+        odd_in_g0 = k_odd < g0_end    # (BK//2,)
+
+        # s_even, z_even: (BK//2, BN) — select per-K, broadcast per-N
+        s_even = tl.where(even_in_g0[:, None], s0[None, :], s1[None, :])
+        z_even = tl.where(even_in_g0[:, None], z0[None, :], z1[None, :])
+        s_odd = tl.where(odd_in_g0[:, None], s0[None, :], s1[None, :])
+        z_odd = tl.where(odd_in_g0[:, None], z0[None, :], z1[None, :])
+
+        w_even = (w_even - z_even) * s_even
+        w_odd = (w_odd - z_odd) * s_odd
+
         x_even_ptrs = x_ptr + offs_m[:, None] * x_stride_m + (k_start + offs_kh[None, :] * 2) * x_stride_k
-        x_even = tl.load(x_even_ptrs, mask=(offs_m[:, None] < M) & (k_start + offs_kh[None, :] * 2 < K), other=0.0)
+        x_even = tl.load(x_even_ptrs, mask=m_mask[:, None] & (k_start + offs_kh[None, :] * 2 < K), other=0.0)
         x_odd_ptrs = x_ptr + offs_m[:, None] * x_stride_m + (k_start + offs_kh[None, :] * 2 + 1) * x_stride_k
-        x_odd = tl.load(x_odd_ptrs, mask=(offs_m[:, None] < M) & (k_start + offs_kh[None, :] * 2 + 1 < K), other=0.0)
+        x_odd = tl.load(x_odd_ptrs, mask=m_mask[:, None] & (k_start + offs_kh[None, :] * 2 + 1 < K), other=0.0)
 
         acc += tl.dot(x_even, w_even)
         acc += tl.dot(x_odd, w_odd)
 
     tl.store(out_ptr + offs_m[:, None] * out_stride_m + offs_n[None, :] * out_stride_n,
-             acc.to(tl.bfloat16), mask=(offs_m[:, None] < M) & (offs_n[None, :] < N))
+             acc.to(tl.bfloat16), mask=m_mask[:, None] & (offs_n[None, :] < N))
 
 
 def _pack_int4(w_q):
@@ -103,37 +115,28 @@ class Model(nn.Module):
     def forward(self, x):
         M = x.shape[0]
         N, K = self.N, self.K
-        # For small M (decode), use PyTorch fallback with fused dequant
-        if M <= 4:
-            xb = x.to(torch.bfloat16)
-            results = []
-            for name in ("gate", "up"):
-                wq = getattr(self, f"w_q_{name}")
-                w_lo = (wq & 0xF).to(torch.bfloat16)
-                w_hi = ((wq >> 4) & 0xF).to(torch.bfloat16)
-                w = torch.empty(K, N, dtype=torch.bfloat16, device=x.device)
-                w[0::2] = w_lo
-                w[1::2] = w_hi
-                g_idx = torch.arange(K, device=x.device) // self.group_size
-                scales = getattr(self, f"scales_{name}").index_select(0, g_idx)
-                zeros = getattr(self, f"zeros_{name}").index_select(0, g_idx)
-                w = (w - zeros) * scales
-                results.append(xb @ w)
-            return (F.silu(results[0].float()) * results[1].float()).to(torch.bfloat16)
 
-        # Triton fused kernel for larger M
-        BM = min(64, M)
+        if M < 16:
+            x_padded = torch.zeros(16, K, dtype=x.dtype, device=x.device)
+            x_padded[:M] = x
+            x_use = x_padded
+            M_use = 16
+        else:
+            x_use = x
+            M_use = M
+
+        BM = 16
         BN = 64
-        BK = 96  # = GROUP_SIZE
-        grid = (triton.cdiv(M, BM), triton.cdiv(N, BN))
+        BK = 128
+        grid = (triton.cdiv(M_use, BM), triton.cdiv(N, BN))
 
-        gate_out = torch.empty(M, N, dtype=torch.bfloat16, device=x.device)
-        up_out = torch.empty(M, N, dtype=torch.bfloat16, device=x.device)
+        gate_out = torch.empty(M_use, N, dtype=torch.bfloat16, device=x.device)
+        up_out = torch.empty(M_use, N, dtype=torch.bfloat16, device=x.device)
 
         dequant_gemv_kernel[grid](
-            x, self.w_q_gate, self.scales_gate, self.zeros_gate, gate_out,
-            M, N, K,
-            x.stride(0), x.stride(1),
+            x_use, self.w_q_gate, self.scales_gate, self.zeros_gate, gate_out,
+            M_use, N, K,
+            x_use.stride(0), x_use.stride(1),
             self.w_q_gate.stride(0), self.w_q_gate.stride(1),
             self.scales_gate.stride(0), self.scales_gate.stride(1),
             gate_out.stride(0), gate_out.stride(1),
@@ -141,16 +144,17 @@ class Model(nn.Module):
             num_warps=4, num_stages=3,
         )
         dequant_gemv_kernel[grid](
-            x, self.w_q_up, self.scales_up, self.zeros_up, up_out,
-            M, N, K,
-            x.stride(0), x.stride(1),
+            x_use, self.w_q_up, self.scales_up, self.zeros_up, up_out,
+            M_use, N, K,
+            x_use.stride(0), x_use.stride(1),
             self.w_q_up.stride(0), self.w_q_up.stride(1),
             self.scales_up.stride(0), self.scales_up.stride(1),
             up_out.stride(0), up_out.stride(1),
             BM=BM, BN=BN, BK=BK, GROUP=self.group_size,
             num_warps=4, num_stages=3,
         )
-        return (F.silu(gate_out.float()) * up_out.float()).to(torch.bfloat16)
+        result = (F.silu(gate_out.float()) * up_out.float()).to(torch.bfloat16)
+        return result[:M]
 
 M = 1; N = 11008; K = 4096
 
