@@ -20,8 +20,8 @@ peak_bandwidth_key: dram
 tolerance:
   float32: 0.0
 
-language: cuda
-require_cuda_evidence: true
+language: any
+require_cuda_evidence: false
 
 # The reference sorts; the solution may not — a sort-free device algorithm
 # (histogram / counting / threshold search) is the entire problem. Patterns
@@ -41,10 +41,6 @@ forbidden:
   - "cub::DeviceRadixSort"
   - "cub::DeviceSegmentedRadixSort"
   - "thrust::sort"
-  - "import triton"
-  - "from triton"
-  - "@triton.jit"
-  - "triton.language"
   - "import reference"
   - "from reference"
 

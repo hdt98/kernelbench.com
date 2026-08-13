@@ -28,55 +28,23 @@ const citationGraph = {
 export default async function HomePage() {
   const modelIdx = await loadModelIndex()
 
-  const megaByGpu: NonNullable<HomeDeck["byGpu"]> = {}
-  const hardByGpu: NonNullable<HomeDeck["byGpu"]> = {}
+  const amdByGpu: NonNullable<HomeDeck["byGpu"]> = {}
   for (const g of HOME_GPU_TABS) {
-    megaByGpu[g.key] = reportCardForBench(
+    amdByGpu[g.key] = reportCardForBench(
       modelIdx,
-      "mega",
-      g.key === "rtxpro6000" ? undefined : g.key,
-    )
-    hardByGpu[g.key] = reportCardForBench(
-      modelIdx,
-      "hard",
-      g.key === "rtxpro6000" ? undefined : g.key,
+      "amd",
+      g.key === "mi325x" ? undefined : g.key,
     )
   }
 
-  const cudaReport = reportCardForBench(modelIdx, "cuda")
-
   const decks: HomeDeck[] = [
     {
-      key: "mega",
-      title: "Mega",
-      accent: "#76b900",
-      byGpu: megaByGpu,
+      key: "amd",
+      title: "AMD",
+      accent: "#ED1C24",
+      byGpu: amdByGpu,
       gpus: HOME_GPU_TABS,
       defaultGpu: DEFAULT_GPU,
-    },
-    {
-      key: "cuda",
-      title: "CUDA",
-      accent: "#38bdf8",
-      byGpu: { rtxpro6000: cudaReport },
-      gpus: [{ key: "rtxpro6000", label: "RTX PRO 6000" }],
-      defaultGpu: "rtxpro6000",
-    },
-    {
-      key: "hard",
-      title: "Hard",
-      accent: "#a78bfa",
-      byGpu: hardByGpu,
-      gpus: HOME_GPU_TABS,
-      defaultGpu: DEFAULT_GPU,
-    },
-    {
-      key: "multi",
-      title: "Multi",
-      accent: "#fbbf24",
-      byGpu: null,
-      gpus: [],
-      defaultGpu: "",
     },
   ]
 
@@ -113,3 +81,4 @@ export default async function HomePage() {
     </div>
   )
 }
+

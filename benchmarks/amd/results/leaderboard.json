@@ -42,7 +42,7 @@
           "run_id": "manual_topk",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0017,
+          "peak_fraction": 0.0016,
           "failure_reason": null,
           "retryable_infra_failure": false
         },
@@ -58,7 +58,7 @@
           "run_id": "manual_w4a16",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.01,
+          "peak_fraction": 0.0076,
           "failure_reason": null,
           "retryable_infra_failure": false
         },
@@ -67,23 +67,23 @@
           "correct": null,
           "has_solution": true,
           "peak_fraction": null,
-          "failure_reason": "pending GPU verification",
+          "failure_reason": "hypothesis property_stress segfault",
           "retryable_infra_failure": true
         },
         "02_kda_cutlass": {
           "run_id": "manual_kda",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": null,
+          "peak_fraction": 0.0001,
           "failure_reason": null,
           "retryable_infra_failure": false
         },
         "01_dequant_gemv": {
           "run_id": "manual_01_dequant_gemv",
           "correct": null,
-          "has_solution": false,
+          "has_solution": true,
           "peak_fraction": null,
-          "failure_reason": "not yet attempted",
+          "failure_reason": "check.py hangs with nightly venv; existing venv segfaults on .to(device)",
           "retryable_infra_failure": false
         },
         "01_glm52_fused_moe": {
@@ -119,19 +119,19 @@
           "retryable_infra_failure": false
         },
         "03_topp_mask": {
-          "run_id": "manual_03_topp_mask",
+          "run_id": "manual_topp_mask",
           "correct": null,
-          "has_solution": false,
+          "has_solution": true,
           "peak_fraction": null,
-          "failure_reason": "not yet attempted",
+          "failure_reason": "Triton kernel uses unsupported break statement",
           "retryable_infra_failure": false
         },
         "04_flash_attention": {
-          "run_id": "manual_04_flash_attention",
-          "correct": null,
-          "has_solution": false,
-          "peak_fraction": null,
-          "failure_reason": "not yet attempted",
+          "run_id": "manual_flash_attn",
+          "correct": true,
+          "has_solution": true,
+          "peak_fraction": 0.0627,
+          "failure_reason": null,
           "retryable_infra_failure": false
         },
         "04_grid_mingru_sps": {
@@ -143,7 +143,7 @@
           "retryable_infra_failure": false
         }
       },
-      "pass_count": 5,
+      "pass_count": 6,
       "total_runs": 14
     }
   ],
@@ -163,7 +163,7 @@
     "05_topk_bitonic": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0017,
+      "best_peak_fraction": 0.0016,
       "best_model": "manual",
       "ranked_passes": [
         {
@@ -187,7 +187,7 @@
     "07_w4a16_gemm": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.01,
+      "best_peak_fraction": 0.0076,
       "best_model": "manual",
       "ranked_passes": [
         {
@@ -206,9 +206,11 @@
     "02_kda_cutlass": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": null,
+      "best_peak_fraction": 0.0001,
       "best_model": "manual",
-      "ranked_passes": []
+      "ranked_passes": [
+        { "model": "manual", "peak_fraction": 0.0001 }
+      ]
     },
     "01_dequant_gemv": {
       "n_attempted": 0,
@@ -253,11 +255,13 @@
       "ranked_passes": []
     },
     "04_flash_attention": {
-      "n_attempted": 0,
-      "n_passed": 0,
-      "best_peak_fraction": null,
-      "best_model": null,
-      "ranked_passes": []
+      "n_attempted": 1,
+      "n_passed": 1,
+      "best_peak_fraction": 0.0627,
+      "best_model": "manual",
+      "ranked_passes": [
+        { "model": "manual", "peak_fraction": 0.0627 }
+      ]
     },
     "04_grid_mingru_sps": {
       "n_attempted": 0,

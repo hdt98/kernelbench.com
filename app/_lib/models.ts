@@ -154,11 +154,11 @@ export const SITE_HIDDEN_GPUS = new Set<string>([])
  * Default GPU board for multi-GPU decks and the homepage ranking toggle.
  * Tab strip order is HOME_GPU_TABS; initial selection is DEFAULT_GPU.
  */
-export const DEFAULT_GPU = "h100"
+export const DEFAULT_GPU = "mi325x"
 
 /** GPU key for the canonical boards — cells built without an explicit gpu
  *  belong to this board (data paths for it are un-namespaced). */
-export const CANONICAL_GPU = "rtxpro6000"
+export const CANONICAL_GPU = "mi325x"
 
 /**
  * Homepage / deck GPU tabs: H100 → RTX PRO 6000 → B200.
@@ -172,13 +172,10 @@ export const CANONICAL_GPU = "rtxpro6000"
  */
 export const HOME_GPU_TABS: { key: string; label: string }[] = [
   { key: "mi325x", label: "AMD MI325X" },
-  { key: "h100", label: "H100 PCIe" },
-  { key: "rtxpro6000", label: "RTX PRO 6000" },
-  { key: "b200", label: "B200" },
 ]
 
 /** Homepage ranking chart order (Mega → CUDA → Hard). */
-export const HOME_BENCH_ORDER: Bench[] = ["amd", "mega", "cuda", "hard"]
+export const HOME_BENCH_ORDER: Bench[] = ["amd"]
 
 /**
  * Lab brand presentation for charts (AA-style: bar color + logo keyed by lab).

@@ -27,7 +27,7 @@ import torch.nn.functional as F
 
 OP_TYPE = "dequant_gemv_gated"
 SUPPORTED_PRECISIONS = ["int4_bf16"]
-HARDWARE_REQUIRED = ["H100_SXM"]
+HARDWARE_REQUIRED = ["MI325X"]
 
 GROUP_SIZE = 96
 

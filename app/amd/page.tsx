@@ -5,5 +5,5 @@ import { redirect } from "next/navigation"
 // old external links (posts, README) still land on the right section.
 
 export default function Page() {
-  redirect("/#hard")
+  redirect("/#amd")
 }
