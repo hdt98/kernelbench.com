@@ -1,0 +1,33 @@
+name: 03_paged_attention
+display_name: "Paged Attention Decode"
+precision: bf16
+regime: memory
+
+flops_formula: "4 * batch * num_heads * seq_len * head_dim"
+bytes_formula: "2 * batch * seq_len * num_kv_heads * head_dim * 2 + batch * num_heads * head_dim * 2 * 2"
+
+hardware: [MI325X]
+peak_tflops_key: bf16
+peak_bandwidth_key: dram
+
+tolerance:
+  bfloat16: 0.02
+  float16: 0.02
+
+forbidden:
+  - "vllm.attention"
+  - "flashinfer.batch_decode_with_paged_kv_cache"
+  - "flashinfer.decode"
+  - "torch.nn.functional.scaled_dot_product_attention"
+  - "F.scaled_dot_product_attention"
+
+sota:
+  name: "vLLM ROCm PagedAttention / FlashAttention-ROCm"
+  url: "https://github.com/vllm-project/vllm"
+  function: "vllm.attention"
+  deps:
+    - "vllm (ROCm build)"
+  reference_throughput_gbps_mi325x: 5000
+
+num_correct_trials: 3
+num_perf_trials: 50
