@@ -199,7 +199,7 @@ export async function generateMetadata({
   const found = await findCell(gpu, rid)
   if (!found) return {}
   const title = `${found.modelName} · ${problemLabel(found.problem)} · ${GPU_NAMES[gpu] ?? gpu}`
-  return { title, description: `nexuskernel.com run ${rid}` }
+  return { title, description: `kernelbench.com run ${rid}` }
 }
 
 function fmtDuration(s: number | null | undefined): string {
@@ -340,7 +340,7 @@ export default async function RunPage({
   return (
     <main className="run-page">
       <p className="page-head-kicker">
-        <Link href={`/#${bench}`}>nexuskernel.com</Link> · {gpuName}
+        <Link href={`/#${bench}`}>kernelbench.com</Link> · {gpuName}
       </p>
       <h1 className="page-head-title">
         {problemLabel(problem)}{" "}

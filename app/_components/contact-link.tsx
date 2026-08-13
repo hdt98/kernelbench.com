@@ -11,7 +11,7 @@ import { useState } from "react"
 const CONTACT_FORM_URL: string | null = null
 
 const U = ["contact"]
-const D = ["onenexus-do", "cloud"]
+const D = ["kernelbench", "com"]
 
 export function ContactLink() {
   const [href, setHref] = useState<string | null>(null)

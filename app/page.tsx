@@ -6,9 +6,9 @@ const citationGraph = {
   "@graph": [
     {
       "@type": "WebSite",
-      "@id": "https://nexuskernel.com/#website",
-      name: "nexuskernel.com",
-      url: "https://nexuskernel.com",
+      "@id": "https://kernelbench.com/#website",
+      name: "kernelbench.com",
+      url: "https://kernelbench.com",
       author: { "@type": "Person", name: "Elliot Arledge", url: "https://elliotarledge.com" },
       description: "Open GPU kernel benchmark results for AMD Instinct GPUs.",
     },

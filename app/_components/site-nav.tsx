@@ -16,7 +16,7 @@ const NAV = [
 
 function Wordmark() {
   return (
-      <Link href="/" className="nav-wordmark no-underline" aria-label="nexuskernel.com home">
+      <Link href="/" className="nav-wordmark no-underline" aria-label="kernelbench.com home">
       <svg
         className="nav-mark"
         viewBox="0 0 20 20"

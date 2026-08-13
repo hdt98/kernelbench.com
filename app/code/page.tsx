@@ -3,7 +3,7 @@ import type { Metadata } from "next"
 import CodeViewer from "./viewer"
 
 export const metadata: Metadata = {
-  title: "code viewer — nexuskernel.com",
+  title: "code viewer — kernelbench.com",
   robots: { index: false },
 }
 

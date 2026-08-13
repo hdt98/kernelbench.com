@@ -1,10 +1,10 @@
-// KernelBench-aligned header: sticky, backdrop-blur, clean zinc palette.
+// kernelbench.com header: sticky, backdrop-blur, clean zinc palette.
 
 export function SiteBrand() {
   return (
     <header className="sticky top-0 z-50 border-b border-zinc-100 bg-white/85 backdrop-blur-xl">
       <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6 lg:px-8" aria-label="Primary navigation">
-        <a className="flex items-center gap-2.5 text-[17px] font-semibold tracking-tight text-zinc-950 no-underline" href="/" aria-label="nexuskernel.com home">
+        <a className="flex items-center gap-2.5 text-[17px] font-semibold tracking-tight text-zinc-950 no-underline" href="/" aria-label="kernelbench.com home">
           <span className="flex size-7 items-center justify-center rounded-[7px] bg-zinc-950 text-white" aria-hidden="true">
             <svg className="size-4" viewBox="0 0 16 16" fill="none">
               <rect x="1.5" y="9" width="3.5" height="6" rx="0.8" fill="currentColor" opacity="0.45" />
