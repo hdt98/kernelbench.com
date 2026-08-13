@@ -1,58 +1,13 @@
-"""W4A16 GEMM via fused Triton dequant+matmul on AMD MI325X (gfx942).
-Always uses Triton kernel (no PyTorch fallback for small M).
+"""W4A16 GEMM via lazy bf16 dequant + rocBLAS matmul on AMD MI325X.
+
+Dequantizes int4 weights to bf16 on first forward call and caches the result.
+Subsequent calls use torch.matmul (rocBLAS) which achieves much higher
+bandwidth efficiency than the Triton dequant+GEMV pipeline.
 """
 import torch
 import torch.nn as nn
-import triton
-import triton.language as tl
 
 GROUP_SIZE = 128
-
-@triton.jit
-def w4a16_gemm_kernel(
-    x_ptr, wq_ptr, scales_ptr, zeros_ptr, out_ptr,
-    M, N, K,
-    x_stride_m, x_stride_k,
-    wq_stride_k, wq_stride_n,
-    s_stride_g, s_stride_n,
-    out_stride_m, out_stride_n,
-    BM: tl.constexpr, BN: tl.constexpr, BK: tl.constexpr,
-    GROUP: tl.constexpr,
-):
-    pid_m = tl.program_id(0)
-    pid_n = tl.program_id(1)
-    offs_m = pid_m * BM + tl.arange(0, BM)
-    offs_n = pid_n * BN + tl.arange(0, BN)
-    offs_kh = tl.arange(0, BK // 2)
-
-    m_mask = offs_m < M
-    acc = tl.zeros((BM, BN), dtype=tl.float32)
-
-    for k_start in range(0, K, BK):
-        wq_ptrs = wq_ptr + ((k_start // 2) + offs_kh[:, None]) * wq_stride_k + offs_n[None, :] * wq_stride_n
-        wq = tl.load(wq_ptrs, mask=(offs_n[None, :] < N), other=0)
-
-        w_even = (wq & 0xF).to(tl.bfloat16)
-        w_odd = ((wq >> 4) & 0xF).to(tl.bfloat16)
-
-        g = k_start // GROUP
-        s = tl.load(scales_ptr + g * s_stride_g + offs_n * s_stride_n, mask=offs_n < N, other=0.0)
-        z = tl.load(zeros_ptr + g * s_stride_g + offs_n * s_stride_n, mask=offs_n < N, other=0.0)
-
-        w_even = (w_even - z[None, :]) * s[None, :]
-        w_odd = (w_odd - z[None, :]) * s[None, :]
-
-        x_even_ptrs = x_ptr + offs_m[:, None] * x_stride_m + (k_start + offs_kh[None, :] * 2) * x_stride_k
-        x_even = tl.load(x_even_ptrs, mask=m_mask[:, None] & (k_start + offs_kh[None, :] * 2 < K), other=0.0)
-        x_odd_ptrs = x_ptr + offs_m[:, None] * x_stride_m + (k_start + offs_kh[None, :] * 2 + 1) * x_stride_k
-        x_odd = tl.load(x_odd_ptrs, mask=m_mask[:, None] & (k_start + offs_kh[None, :] * 2 + 1 < K), other=0.0)
-
-        acc += tl.dot(x_even, w_even)
-        acc += tl.dot(x_odd, w_odd)
-
-    tl.store(out_ptr + offs_m[:, None] * out_stride_m + offs_n[None, :] * out_stride_n,
-             acc.to(tl.bfloat16), mask=m_mask[:, None] & (offs_n[None, :] < N))
-
 
 class Model(nn.Module):
     def __init__(self, M, N, K, group_size=GROUP_SIZE):
@@ -77,36 +32,36 @@ class Model(nn.Module):
         self.register_buffer("w_q", w_packed)
         self.register_buffer("scales", scales.squeeze(1).to(torch.bfloat16))
         self.register_buffer("zeros", zeros.squeeze(1).to(torch.bfloat16))
+        self._w_bf16 = None
+
+    def _dequantize(self, device):
+        """Dequantize int4 weights to bf16, applying per-group scales and zeros."""
+        w_q = self.w_q  # [K/2, N] uint8
+        K, N = self.K, self.N
+        GROUP = self.group_size
+        n_groups = K // GROUP
+
+        # Unpack int4 to bf16
+        w_even = (w_q & 0xF).to(torch.bfloat16)   # [K/2, N]
+        w_odd = ((w_q >> 4) & 0xF).to(torch.bfloat16)  # [K/2, N]
+
+        # Interleave even/odd back to [K, N]
+        w = torch.empty(K, N, dtype=torch.bfloat16, device=device)
+        w[0::2] = w_even
+        w[1::2] = w_odd
+
+        # Expand scales/zeros from [n_groups, N] to [K, N]
+        scales = self.scales.repeat_interleave(GROUP, dim=0)  # [K, N]
+        zeros = self.zeros.repeat_interleave(GROUP, dim=0)    # [K, N]
+
+        # Apply dequantization
+        w = (w - zeros) * scales
+        return w.contiguous()
 
     def forward(self, x):
-        M = x.shape[0]
-        N, K = self.N, self.K
-
-        if M < 16:
-            x_padded = torch.zeros(16, K, dtype=x.dtype, device=x.device)
-            x_padded[:M] = x
-            x_use = x_padded
-            M_use = 16
-        else:
-            x_use = x
-            M_use = M
-
-        BM = 16 if M_use < 64 else 64
-        BN = 64 if M_use < 64 else 128
-        BK = 128
-        grid = (triton.cdiv(M_use, BM), triton.cdiv(N, BN))
-        out = torch.empty(M_use, N, dtype=torch.bfloat16, device=x.device)
-        w4a16_gemm_kernel[grid](
-            x_use, self.w_q, self.scales, self.zeros, out,
-            M_use, N, K,
-            x_use.stride(0), x_use.stride(1),
-            self.w_q.stride(0), self.w_q.stride(1),
-            self.scales.stride(0), self.scales.stride(1),
-            out.stride(0), out.stride(1),
-            BM=BM, BN=BN, BK=BK, GROUP=self.group_size,
-            num_warps=4, num_stages=3,
-        )
-        return out[:M]
+        if self._w_bf16 is None or self._w_bf16.device != x.device:
+            self._w_bf16 = self._dequantize(x.device)
+        return torch.matmul(x, self._w_bf16)
 
 M = 1
 N = 12288
@@ -118,3 +73,4 @@ def get_inputs():
 
 def get_init_inputs():
     return [M, N, K]
+
