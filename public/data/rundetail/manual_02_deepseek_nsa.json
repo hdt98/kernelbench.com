@@ -1,0 +1,94 @@
+{
+  "run_id": "manual_02_deepseek_nsa",
+  "bench": "amd",
+  "gpu": "mi325x",
+  "problem": "02_deepseek_nsa",
+  "regime": "compute",
+  "dtype": "bf16",
+  "peak_tflops": 13058.0,
+  "peak_bw_gb_s": 8000.0,
+  "annotation_verdict": "clean",
+  "stats": {
+    "agent_s": null,
+    "total_s": null,
+    "check_s": null,
+    "benchmark_s": null,
+    "output_tokens": null,
+    "cost_usd": null
+  },
+  "gpu_lock": null,
+  "shapes": [
+    {
+      "idx": 0,
+      "label": "{\"B\": 1, \"H\": 16, \"S\": 2048, \"D\": 64}",
+      "ms": 4.172,
+      "tflops": 4.117,
+      "gbps": 4.021,
+      "frac": 0.0026,
+      "bound": "compute",
+      "util": 0.0026,
+      "compute_util": 0.0003152856486445091,
+      "mem_util": 0.000502625
+    },
+    {
+      "idx": 1,
+      "label": "{\"B\": 1, \"H\": 16, \"S\": 4127, \"D\": 64}",
+      "ms": 17.211,
+      "tflops": 4.053,
+      "gbps": 1.964,
+      "frac": 0.0025,
+      "bound": "compute",
+      "util": 0.0025,
+      "compute_util": 0.00031038443865829375,
+      "mem_util": 0.0002455
+    },
+    {
+      "idx": 2,
+      "label": "{\"B\": 1, \"H\": 8, \"S\": 8192, \"D\": 64}",
+      "ms": 31.468,
+      "tflops": 4.368,
+      "gbps": 1.066,
+      "frac": 0.0027,
+      "bound": "compute",
+      "util": 0.0027,
+      "compute_util": 0.00033450758155919745,
+      "mem_util": 0.00013325
+    },
+    {
+      "idx": 3,
+      "label": "{\"B\": 1, \"H\": 8, \"S\": 8191, \"D\": 128}",
+      "ms": 34.229,
+      "tflops": 8.029,
+      "gbps": 1.96,
+      "frac": 0.005,
+      "bound": "compute",
+      "util": 0.005,
+      "compute_util": 0.0006148721090519221,
+      "mem_util": 0.000245
+    },
+    {
+      "idx": 4,
+      "label": "{\"B\": 4, \"H\": 8, \"S\": 1024, \"D\": 64}",
+      "ms": 2.337,
+      "tflops": 3.676,
+      "gbps": 7.179,
+      "frac": 0.0023,
+      "bound": "compute",
+      "util": 0.0023,
+      "compute_util": 0.000281513248583244,
+      "mem_util": 0.0008973750000000001
+    },
+    {
+      "idx": 5,
+      "label": "{\"B\": 2, \"H\": 8, \"S\": 3000, \"D\": 64}",
+      "ms": 8.981,
+      "tflops": 4.105,
+      "gbps": 2.737,
+      "frac": 0.0025,
+      "bound": "compute",
+      "util": 0.0025,
+      "compute_util": 0.0003143666717720938,
+      "mem_util": 0.00034212500000000004
+    }
+  ]
+}

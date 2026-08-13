@@ -1,0 +1,70 @@
+{
+  "run_id": "manual_fp8_gemm",
+  "bench": "amd",
+  "gpu": "mi325x",
+  "problem": "01_fp8_gemm",
+  "regime": "compute",
+  "dtype": "fp8_e4m3",
+  "peak_tflops": 26117.0,
+  "peak_bw_gb_s": 8000.0,
+  "annotation_verdict": "clean",
+  "stats": {
+    "agent_s": null,
+    "total_s": null,
+    "check_s": null,
+    "benchmark_s": null,
+    "output_tokens": null,
+    "cost_usd": null
+  },
+  "gpu_lock": null,
+  "shapes": [
+    {
+      "idx": 0,
+      "label": "M=4096 N=4096 K=4096",
+      "ms": 0.239,
+      "tflops": 576.222,
+      "gbps": 281.358,
+      "frac": 0.1785,
+      "bound": "compute",
+      "util": 0.1785,
+      "compute_util": 0.022063100662403797,
+      "mem_util": 0.03516975
+    },
+    {
+      "idx": 1,
+      "label": "M=4096 N=4096 K=4127",
+      "ms": 0.338,
+      "tflops": 409.488,
+      "gbps": 199.195,
+      "frac": 0.1268,
+      "bound": "compute",
+      "util": 0.1268,
+      "compute_util": 0.015678983037868056,
+      "mem_util": 0.024899374999999998
+    },
+    {
+      "idx": 2,
+      "label": "M=32 N=8192 K=8192",
+      "ms": 0.051,
+      "tflops": 84.949,
+      "gbps": 1342.879,
+      "frac": 0.0263,
+      "bound": "compute",
+      "util": 0.0263,
+      "compute_util": 0.003252632385036566,
+      "mem_util": 0.167859875
+    },
+    {
+      "idx": 3,
+      "label": "M=4096 N=14336 K=4096",
+      "ms": 0.67,
+      "tflops": 718.209,
+      "gbps": 288.065,
+      "frac": 0.2224,
+      "bound": "compute",
+      "util": 0.2224,
+      "compute_util": 0.027499674541486385,
+      "mem_util": 0.036008125
+    }
+  ]
+}

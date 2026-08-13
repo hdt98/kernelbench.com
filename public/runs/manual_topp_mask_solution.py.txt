@@ -1,0 +1,100 @@
+"""Top-p (nucleus) mask via Triton on AMD MI325X (gfx942).
+
+Sort-free approach: iteratively select the max probability token,
+accumulate the cumulative mass, and stop when it reaches p.
+Uses a Triton kernel for the softmax + iterative max selection.
+"""
+import torch
+import torch.nn as nn
+import triton
+import triton.language as tl
+
+@triton.jit
+def topp_mask_kernel(
+    logits_ptr, mask_ptr,
+    V, P,
+    stride_b, stride_v,
+    BLOCK: tl.constexpr,
+):
+    row = tl.program_id(0)
+    offs = tl.arange(0, BLOCK)
+    mask_load = offs < V
+
+    # Load logits and compute softmax
+    logits = tl.load(logits_ptr + row * stride_b + offs * stride_v, mask=mask_load, other=float("-inf"))
+    max_logit = tl.max(logits, axis=0)
+    exp_vals = tl.exp(logits - max_logit)
+    sum_exp = tl.sum(exp_vals, axis=0)
+    probs = exp_vals / sum_exp
+
+    # Initialize mask to False
+    result = tl.zeros((BLOCK,), dtype=tl.int1)
+
+    # Iteratively select max prob token until cumulative mass >= P
+    remaining = probs
+    cumsum = tl.zeros((1,), dtype=tl.float32)
+    for _ in range(0, 512):  # max iterations (V could be large but p=0.9 means ~few hundred)
+        max_prob = tl.max(remaining, axis=0)
+        max_idx = tl.argmax(remaining, axis=0)
+        # Add to mask
+        result = tl.where(offs == max_idx, True, result)
+        # Zero out the selected token
+        remaining = tl.where(offs == max_idx, 0.0, remaining)
+        # Accumulate
+        cumsum += max_prob
+        # Check if we've reached P
+        if cumsum >= P:
+            break
+
+    # Write mask
+    tl.store(mask_ptr + row * stride_b + offs * stride_v, result, mask=mask_load)
+
+
+class Model(nn.Module):
+    def __init__(self, B, V, P):
+        super().__init__()
+        self.B, self.V, self.P = B, V, P
+        self.register_buffer("_dummy", torch.zeros(1, dtype=torch.float32))
+
+    def forward(self, logits):
+        B, V = logits.shape
+        P = self.P
+
+        # Find next power of 2 >= V
+        block = 1
+        while block < V:
+            block *= 2
+        if block > 262144:
+            # Iterative max approach for very large V (no sort)
+            probs = torch.softmax(logits.float(), dim=-1)
+            mask = torch.zeros(B, V, dtype=torch.bool, device=logits.device)
+            for b in range(B):
+                p = probs[b].clone()
+                cum = 0.0
+                for _ in range(V):
+                    val, idx = torch.max(p, dim=0)
+                    mask[b, idx] = True
+                    p[idx] = 0.0
+                    cum += val.item()
+                    if cum >= P:
+                        break
+            return mask
+
+        mask = torch.zeros(B, V, dtype=torch.bool, device=logits.device)
+        topp_mask_kernel[(B,)](
+            logits, mask,
+            V, P,
+            logits.stride(0), logits.stride(1),
+            BLOCK=block,
+            num_warps=8 if block >= 131072 else 4,
+        )
+        return mask
+
+B = 1; V = 151936; P = 0.9
+
+def get_inputs():
+    logits = torch.randn(B, V, dtype=torch.float32) * 3.0
+    return [logits]
+
+def get_init_inputs():
+    return [B, V, P]

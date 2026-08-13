@@ -1,0 +1,94 @@
+{
+  "run_id": "manual_01_glm52_fused_moe",
+  "bench": "amd",
+  "gpu": "mi325x",
+  "problem": "01_glm52_fused_moe",
+  "regime": "compute",
+  "dtype": "bf16",
+  "peak_tflops": 13058.0,
+  "peak_bw_gb_s": 8000.0,
+  "annotation_verdict": "clean",
+  "stats": {
+    "agent_s": null,
+    "total_s": null,
+    "check_s": null,
+    "benchmark_s": null,
+    "output_tokens": null,
+    "cost_usd": null
+  },
+  "gpu_lock": null,
+  "shapes": [
+    {
+      "idx": 0,
+      "label": "{\"T\": 4096, \"E\": E, \"top_k\": TOP_K, \"n_shared\": N_SHARED, \"H",
+      "ms": 57.01,
+      "tflops": 32.546,
+      "gbps": 228.073,
+      "frac": 0.0202,
+      "bound": "compute",
+      "util": 0.0202,
+      "compute_util": 0.002492418440802573,
+      "mem_util": 0.028509125
+    },
+    {
+      "idx": 1,
+      "label": "{\"T\": 4127, \"E\": E, \"top_k\": TOP_K, \"n_shared\": N_SHARED, \"H",
+      "ms": 59.064,
+      "tflops": 31.652,
+      "gbps": 220.148,
+      "frac": 0.0196,
+      "bound": "compute",
+      "util": 0.0196,
+      "compute_util": 0.0024239546638076277,
+      "mem_util": 0.027518499999999998
+    },
+    {
+      "idx": 2,
+      "label": "{\"T\": 1, \"E\": E, \"top_k\": TOP_K, \"n_shared\": N_SHARED, \"H\": ",
+      "ms": 7.229,
+      "tflops": 0.063,
+      "gbps": 1789.357,
+      "frac": 0.0,
+      "bound": "compute",
+      "util": 0.0,
+      "compute_util": 4.8246285801807325e-06,
+      "mem_util": 0.22366962499999998
+    },
+    {
+      "idx": 3,
+      "label": "{\"T\": 8192, \"E\": E, \"top_k\": TOP_K, \"n_shared\": N_SHARED, \"H",
+      "ms": 75.166,
+      "tflops": 49.369,
+      "gbps": 173.875,
+      "frac": 0.0306,
+      "bound": "compute",
+      "util": 0.0306,
+      "compute_util": 0.003780747434522898,
+      "mem_util": 0.021734375
+    },
+    {
+      "idx": 4,
+      "label": "{\"T\": 512, \"E\": E, \"top_k\": TOP_K, \"n_shared\": N_SHARED, \"H\"",
+      "ms": 46.211,
+      "tflops": 5.019,
+      "gbps": 280.101,
+      "frac": 0.0031,
+      "bound": "compute",
+      "util": 0.0031,
+      "compute_util": 0.00038436207688773166,
+      "mem_util": 0.035012625
+    },
+    {
+      "idx": 5,
+      "label": "{\"T\": 1000, \"E\": E, \"top_k\": TOP_K, \"n_shared\": N_SHARED, \"H",
+      "ms": 47.087,
+      "tflops": 9.62,
+      "gbps": 275.054,
+      "frac": 0.006,
+      "bound": "compute",
+      "util": 0.006,
+      "compute_util": 0.0007367131260529943,
+      "mem_util": 0.034381749999999996
+    }
+  ]
+}

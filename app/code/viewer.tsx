@@ -10,11 +10,11 @@ const PRISM_CDN = "https://cdn.jsdelivr.net/npm/prismjs@1.29.0"
 function normalizeAllowed(f: string): string | null {
   let url: URL
   try {
-    url = new URL(f, "https://nexuskernel.com")
+    url = new URL(f, "https://kernelbench.com")
   } catch {
     return null
   }
-  if (url.origin !== "https://nexuskernel.com") return null
+  if (url.origin !== "https://kernelbench.com") return null
   const path = decodeURIComponent(url.pathname)
   if (path.includes("..")) return null
   if (!path.startsWith("/data/") && !path.startsWith("/runs/")) return null

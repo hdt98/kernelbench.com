@@ -34,49 +34,55 @@
           "run_id": "manual_fp8_gemm",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.1065,
+          "peak_fraction": 0.1073,
           "failure_reason": null,
-          "retryable_infra_failure": false
+          "retryable_infra_failure": false,
+          "solution_url": "/runs/manual_fp8_gemm_solution.py.txt"
         },
         "05_topk_bitonic": {
           "run_id": "manual_topk",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0016,
+          "peak_fraction": 0.0017,
           "failure_reason": null,
-          "retryable_infra_failure": false
+          "retryable_infra_failure": false,
+          "solution_url": "/runs/manual_topk_solution.py.txt"
         },
         "03_paged_attention": {
           "run_id": "manual_03_paged_attention",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0122,
+          "peak_fraction": 0.0143,
           "failure_reason": null,
-          "retryable_infra_failure": false
+          "retryable_infra_failure": false,
+          "solution_url": "/runs/manual_03_paged_attention_solution.py.txt"
         },
         "07_w4a16_gemm": {
           "run_id": "manual_w4a16",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0076,
+          "peak_fraction": 0.01,
           "failure_reason": null,
-          "retryable_infra_failure": false
+          "retryable_infra_failure": false,
+          "solution_url": "/runs/manual_w4a16_solution.py.txt"
         },
         "06_sonic_moe_swiglu": {
           "run_id": "manual_sonic_moe",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0217,
+          "peak_fraction": 0.0216,
           "failure_reason": null,
-          "retryable_infra_failure": false
+          "retryable_infra_failure": false,
+          "solution_url": "/runs/manual_sonic_moe_solution.py.txt"
         },
         "02_kda_cutlass": {
           "run_id": "manual_02_kda_cutlass",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0001,
+          "peak_fraction": 0.0,
           "failure_reason": null,
-          "retryable_infra_failure": false
+          "retryable_infra_failure": false,
+          "solution_url": "/runs/manual_02_kda_cutlass_solution.py.txt"
         },
         "01_dequant_gemv": {
           "run_id": "manual_01_dequant_gemv",
@@ -84,15 +90,17 @@
           "has_solution": true,
           "peak_fraction": 0.0068,
           "failure_reason": null,
-          "retryable_infra_failure": false
+          "retryable_infra_failure": false,
+          "solution_url": "/runs/manual_01_dequant_gemv_solution.py.txt"
         },
         "01_glm52_fused_moe": {
           "run_id": "manual_01_glm52_fused_moe",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0044,
+          "peak_fraction": 0.0045,
           "failure_reason": null,
-          "retryable_infra_failure": false
+          "retryable_infra_failure": false,
+          "solution_url": "/runs/manual_01_glm52_fused_moe_solution.py.txt"
         },
         "02_deepseek_nsa": {
           "run_id": "manual_02_deepseek_nsa",
@@ -100,23 +108,26 @@
           "has_solution": true,
           "peak_fraction": 0.0028,
           "failure_reason": null,
-          "retryable_infra_failure": false
+          "retryable_infra_failure": false,
+          "solution_url": "/runs/manual_02_deepseek_nsa_solution.py.txt"
         },
         "02_segmented_decay_scan": {
           "run_id": "manual_02_segmented_decay_scan",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.016,
+          "peak_fraction": 0.0159,
           "failure_reason": null,
-          "retryable_infra_failure": false
+          "retryable_infra_failure": false,
+          "solution_url": "/runs/manual_02_segmented_decay_scan_solution.py.txt"
         },
         "03_megaqwen_decode": {
           "run_id": "manual_03_megaqwen_decode",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0075,
+          "peak_fraction": 0.0078,
           "failure_reason": null,
-          "retryable_infra_failure": false
+          "retryable_infra_failure": false,
+          "solution_url": "/runs/manual_03_megaqwen_decode_solution.py.txt"
         },
         "03_topp_mask": {
           "run_id": "manual_topp_mask",
@@ -124,23 +135,26 @@
           "has_solution": true,
           "peak_fraction": 0.0012,
           "failure_reason": null,
-          "retryable_infra_failure": false
+          "retryable_infra_failure": false,
+          "solution_url": "/runs/manual_topp_mask_solution.py.txt"
         },
         "04_flash_attention": {
           "run_id": "manual_flash_attn",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0627,
+          "peak_fraction": 0.063,
           "failure_reason": null,
-          "retryable_infra_failure": false
+          "retryable_infra_failure": false,
+          "solution_url": "/runs/manual_flash_attn_solution.py.txt"
         },
         "04_grid_mingru_sps": {
           "run_id": "manual_04_grid_mingru_sps",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0815,
+          "peak_fraction": 0.0967,
           "failure_reason": null,
-          "retryable_infra_failure": false
+          "retryable_infra_failure": false,
+          "solution_url": "/runs/manual_04_grid_mingru_sps_solution.py.txt"
         }
       },
       "pass_count": 14,
@@ -151,19 +165,19 @@
     "01_fp8_gemm": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.1065,
+      "best_peak_fraction": 0.1073,
       "best_model": "manual",
       "ranked_passes": [
         {
           "model": "manual",
-          "peak_fraction": 0.1065
+          "peak_fraction": 0.1073
         }
       ]
     },
     "05_topk_bitonic": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0016,
+      "best_peak_fraction": 0.0017,
       "best_model": "manual",
       "ranked_passes": [
         {
@@ -175,19 +189,19 @@
     "03_paged_attention": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0122,
+      "best_peak_fraction": 0.0143,
       "best_model": "manual",
       "ranked_passes": [
         {
           "model": "manual",
-          "peak_fraction": 0.0122
+          "peak_fraction": 0.0143
         }
       ]
     },
     "07_w4a16_gemm": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0076,
+      "best_peak_fraction": 0.01,
       "best_model": "manual",
       "ranked_passes": [
         {
@@ -199,24 +213,24 @@
     "06_sonic_moe_swiglu": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0217,
+      "best_peak_fraction": 0.0216,
       "best_model": "manual",
       "ranked_passes": [
         {
           "model": "manual",
-          "peak_fraction": 0.0217
+          "peak_fraction": 0.0216
         }
       ]
     },
     "02_kda_cutlass": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0001,
+      "best_peak_fraction": 0.0,
       "best_model": "manual",
       "ranked_passes": [
         {
           "model": "manual",
-          "peak_fraction": 0.0001
+          "peak_fraction": 0.0
         }
       ]
     },
@@ -235,12 +249,12 @@
     "01_glm52_fused_moe": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0044,
+      "best_peak_fraction": 0.0045,
       "best_model": "manual",
       "ranked_passes": [
         {
           "model": "manual",
-          "peak_fraction": 0.0044
+          "peak_fraction": 0.0045
         }
       ]
     },
@@ -259,24 +273,24 @@
     "02_segmented_decay_scan": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.016,
+      "best_peak_fraction": 0.0159,
       "best_model": "manual",
       "ranked_passes": [
         {
           "model": "manual",
-          "peak_fraction": 0.016
+          "peak_fraction": 0.0159
         }
       ]
     },
     "03_megaqwen_decode": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0075,
+      "best_peak_fraction": 0.0078,
       "best_model": "manual",
       "ranked_passes": [
         {
           "model": "manual",
-          "peak_fraction": 0.0075
+          "peak_fraction": 0.0078
         }
       ]
     },
@@ -295,24 +309,24 @@
     "04_flash_attention": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0627,
+      "best_peak_fraction": 0.063,
       "best_model": "manual",
       "ranked_passes": [
         {
           "model": "manual",
-          "peak_fraction": 0.0627
+          "peak_fraction": 0.063
         }
       ]
     },
     "04_grid_mingru_sps": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": 0.0815,
+      "best_peak_fraction": 0.0967,
       "best_model": "manual",
       "ranked_passes": [
         {
           "model": "manual",
-          "peak_fraction": 0.0815
+          "peak_fraction": 0.0967
         }
       ]
     }

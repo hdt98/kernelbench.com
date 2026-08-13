@@ -1,5 +1,5 @@
 name: 02_kda_cutlass
-display_name: "Kimi Delta Attention (chunk forward) via CUTLASS CuTe"
+display_name: "Kimi Delta Attention (chunk forward)"
 precision: bf16
 regime: compute
 

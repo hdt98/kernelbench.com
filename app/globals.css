@@ -2480,7 +2480,7 @@ pre[class*="language-"] {
   }
 }
 
-/* Per-problem report card (Hard / CUDA boards) */
+/* Per-problem report card (AMD boards) */
 .rcard {
   width: 100%;
   --rcard-label: 12.5rem;
@@ -4493,8 +4493,8 @@ pre[class*="language-"] {
   flex-wrap: wrap;
 }
 
-/* NVIDIA-theme action buttons (trace / solution / kernel toggle) — same
- * accent language as the GPU tabs: green outline, fills green on hover. */
+/* Action buttons (trace / solution / kernel toggle) — same
+ * accent language as the GPU tabs: indigo outline, fills indigo on hover. */
 .rdetail-linkbtn {
   display: inline-block;
   background: color-mix(in srgb, var(--color-accent) 8%, var(--color-bg));
@@ -4601,21 +4601,15 @@ pre[class*="language-"] {
   color: var(--color-accent);
 }
 
-/* ---- AMD KernelBench homepage sections ---- */
+/* ---- Nexus KernelBench homepage sections ---- */
 .hero-section {
   position: relative;
   overflow: hidden;
   text-align: center;
-  padding-top: 5rem;
-  padding-bottom: 4rem;
   padding: 2rem 0 1.5rem;
   border-bottom: 1px solid var(--color-border);
 }
 .hero-title {
-  font-size: 2.5rem;
-  font-weight: 600;
-  letter-spacing: -0.04em;
-  color: var(--color-fg-bright);
   font-size: 2rem;
   font-weight: 700;
   color: var(--color-fg-bright);
@@ -4627,12 +4621,13 @@ pre[class*="language-"] {
   color: var(--color-fg-muted);
   max-width: 640px;
   line-height: 1.5;
-  margin: 0 0 1.5rem;
+  margin: 0 auto 1.5rem;
 }
 .hero-stats {
   display: flex;
   gap: 2rem;
   flex-wrap: wrap;
+  justify-content: center;
 }
 .hero-stat {
   display: flex;

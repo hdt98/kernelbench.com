@@ -1,0 +1,70 @@
+"""Paged attention decode — vectorized PyTorch for AMD MI325X.
+
+Handles per-batch sequence lengths via masking. Gathers pages,
+computes QK^T with softmax and V multiplication in parallel.
+"""
+import math
+import torch
+import torch.nn as nn
+
+class Model(nn.Module):
+    def __init__(self, batch, num_heads, num_kv_heads, head_dim, seq_len, page_size):
+        super().__init__()
+        assert num_heads % num_kv_heads == 0
+        self.batch = batch
+        self.num_heads = num_heads
+        self.num_kv_heads = num_kv_heads
+        self.head_dim = head_dim
+        self.seq_len = seq_len
+        self.page_size = page_size
+        self.group_size = num_heads // num_kv_heads
+        self.scale = 1.0 / math.sqrt(head_dim)
+        self.register_buffer("_dummy", torch.zeros(1, dtype=torch.bfloat16), persistent=False)
+
+    def forward(self, query, kv_cache, block_table, seq_lens):
+        B, H, D = query.shape
+        Hkv = self.num_kv_heads
+        G = self.group_size
+        P = self.page_size
+        L_max = int(seq_lens.max().item())
+
+        pages_per_seq = (L_max + P - 1) // P
+        page_indices = block_table[:, :pages_per_seq].reshape(-1).long()
+        kv = kv_cache.index_select(0, page_indices)
+        kv = kv.reshape(B, pages_per_seq * P, Hkv, 2 * D)
+        kv = kv[:, :L_max]
+
+        k = kv[..., :D]
+        v = kv[..., D:]
+
+        k = k.repeat_interleave(G, dim=2)
+        v = v.repeat_interleave(G, dim=2)
+
+        qf = query.float()
+        kf = k.float()
+        vf = v.float()
+
+        scores = torch.einsum("bhd,blhd->bhl", qf, kf) * self.scale
+
+        # Per-batch sequence length masking
+        positions = torch.arange(L_max, device=query.device)
+        mask = positions[None, None, :] < seq_lens[:, None, None]  # (B, 1, L_max)
+        scores = scores.masked_fill(~mask, float("-inf"))
+
+        probs = torch.softmax(scores, dim=-1)
+        out = torch.einsum("bhl,blhd->bhd", probs, vf)
+        return out.to(query.dtype)
+
+def get_inputs():
+    B = 8; H = 32; Hkv = 8; D = 128; L = 1024; P = 16
+    pages_per_seq = (L + P - 1) // P
+    total_pages = max(B * pages_per_seq + 8, 64)
+    query = torch.randn(B, H, D, dtype=torch.bfloat16) * 0.1
+    kv_cache = torch.randn(total_pages, P, Hkv, 2 * D, dtype=torch.bfloat16) * 0.1
+    perm = torch.randperm(total_pages)[: B * pages_per_seq].reshape(B, pages_per_seq).int()
+    block_table = perm.contiguous()
+    seq_lens = torch.full((B,), L, dtype=torch.int32)
+    return [query, kv_cache, block_table, seq_lens]
+
+def get_init_inputs():
+    return [8, 32, 8, 128, 1024, 16]

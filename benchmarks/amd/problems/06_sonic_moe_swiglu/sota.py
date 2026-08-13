@@ -1,15 +1,10 @@
 """SOTA reference for Sonic-MoE up-projection: Tri Dao's sonic-moe.
 
-Status (2026-04): sonic-moe ships on PyPI as `sonic-moe` (>=0.1.2.post1) and
-requires Python>=3.12. It dispatches to QuACK CuTeDSL grouped GEMM kernels.
-SM120 (RTX PRO 6000 Blackwell Workstation) support is in-progress upstream --
-the package installs cleanly but kernels may fail at launch on SM120 (the
-QuACK grouped-GEMM path targets Sm90/Sm100 in the public release).
-
-If the live call fails, `is_available()` returns False and the benchmark scores
-the agent against PyTorch eager + the documented H100 paper ceiling (see
-problem.yaml.sota.reference_throughput_tflops_h100). Agents are FORBIDDEN from
-importing sonic_moe in solution.py (see problem.yaml.forbidden).
+sonic-moe is an NVIDIA-only library (CuTeDSL grouped GEMM kernels) and is not
+available on AMD MI325X. is_available() returns False on ROCm, and the
+benchmark scores the agent against the documented MI325X reference throughput
+(see problem.yaml.sota.reference_throughput_tflops_mi325x). Agents are
+FORBIDDEN from importing sonic_moe in solution.py (see problem.yaml.forbidden).
 """
 from __future__ import annotations
 
@@ -51,21 +46,17 @@ def sota_forward(
 
 
 def is_available() -> bool:
-    # On SM120 with the current public sonic-moe, this is expected to return
-    # False until upstream lands SM120 kernels. Detect by attempting a tiny
-    # smoke call on import; any failure -> not available.
+    # sonic-moe is NVIDIA-only; on AMD ROCm the import fails and we return
+    # False. The benchmark uses the MI325X reference throughput instead.
     try:
         import sonic_moe  # type: ignore  # noqa: F401
     except Exception:
         return False
     if not torch.cuda.is_available():
         return False
-    # Cheap capability gate: sonic-moe public release targets sm_90/sm_100.
-    major, _ = torch.cuda.get_device_capability(0)
-    if major < 9:
-        return False
-    # We do not run a live smoke here (would require allocating real weights);
+    # sonic-moe targets NVIDIA GPUs only (CuTeDSL, sm_90/sm_100).
+    # On AMD ROCm, the import above fails so we never reach here.
     # benchmark.py wraps sota_forward in try/except and treats failures as
-    # "SOTA unavailable" -- see problem.yaml.sota.reference_throughput_tflops_h100
-    # for the documented paper ceiling used in that case.
+    # "SOTA unavailable" -- see problem.yaml.sota.reference_throughput_tflops_mi325x
+    # for the documented MI325X ceiling used in that case.
     return True

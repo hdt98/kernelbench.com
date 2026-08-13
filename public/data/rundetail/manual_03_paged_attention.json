@@ -1,0 +1,82 @@
+{
+  "run_id": "manual_03_paged_attention",
+  "bench": "amd",
+  "gpu": "mi325x",
+  "problem": "03_paged_attention",
+  "regime": "memory",
+  "dtype": "bf16",
+  "peak_tflops": 13058.0,
+  "peak_bw_gb_s": 8000.0,
+  "annotation_verdict": "clean",
+  "stats": {
+    "agent_s": null,
+    "total_s": null,
+    "check_s": null,
+    "benchmark_s": null,
+    "output_tokens": null,
+    "cost_usd": null
+  },
+  "gpu_lock": null,
+  "shapes": [
+    {
+      "idx": 0,
+      "label": "{\"batch\": 8,  \"num_heads\": 32, \"num_kv_heads\": 8,  \"head_dim",
+      "ms": 0.339,
+      "tflops": 0.396,
+      "gbps": 99.48,
+      "frac": 0.0124,
+      "bound": "memory",
+      "util": 0.0124,
+      "compute_util": 3.032623678970746e-05,
+      "mem_util": 0.012435
+    },
+    {
+      "idx": 1,
+      "label": "{\"batch\": 32, \"num_heads\": 32, \"num_kv_heads\": 8,  \"head_dim",
+      "ms": 0.664,
+      "tflops": 1.618,
+      "gbps": 405.334,
+      "frac": 0.0507,
+      "bound": "memory",
+      "util": 0.0507,
+      "compute_util": 0.00012390871496400675,
+      "mem_util": 0.05066675
+    },
+    {
+      "idx": 2,
+      "label": "{\"batch\": 4,  \"num_heads\": 64, \"num_kv_heads\": 8,  \"head_dim",
+      "ms": 1.281,
+      "tflops": 0.419,
+      "gbps": 52.475,
+      "frac": 0.0066,
+      "bound": "memory",
+      "util": 0.0066,
+      "compute_util": 3.20876091285036e-05,
+      "mem_util": 0.006559375
+    },
+    {
+      "idx": 3,
+      "label": "{\"batch\": 16, \"num_heads\": 32, \"num_kv_heads\": 8,  \"head_dim",
+      "ms": 0.5,
+      "tflops": 0.806,
+      "gbps": 201.916,
+      "frac": 0.0252,
+      "bound": "memory",
+      "util": 0.0252,
+      "compute_util": 6.172461326389952e-05,
+      "mem_util": 0.025239499999999998
+    },
+    {
+      "idx": 4,
+      "label": "{\"batch\": 8,  \"num_heads\": 16, \"num_kv_heads\": 4,  \"head_dim",
+      "ms": 0.353,
+      "tflops": 0.186,
+      "gbps": 46.552,
+      "frac": 0.0058,
+      "bound": "memory",
+      "util": 0.0058,
+      "compute_util": 1.4244141522438352e-05,
+      "mem_util": 0.0058189999999999995
+    }
+  ]
+}

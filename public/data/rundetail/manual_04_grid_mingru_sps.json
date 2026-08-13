@@ -1,0 +1,62 @@
+{
+  "run_id": "manual_04_grid_mingru_sps",
+  "bench": "amd",
+  "gpu": "mi325x",
+  "problem": "04_grid_mingru_sps",
+  "regime": "throughput",
+  "dtype": "fp32",
+  "peak_tflops": 13058.0,
+  "peak_bw_gb_s": 8000.0,
+  "annotation_verdict": "clean",
+  "stats": {
+    "agent_s": null,
+    "total_s": null,
+    "check_s": null,
+    "benchmark_s": null,
+    "output_tokens": null,
+    "cost_usd": null
+  },
+  "gpu_lock": null,
+  "shapes": [
+    {
+      "idx": 0,
+      "label": "{\"num_envs\": 4096, \"horizon\": 32}",
+      "ms": 0.0209,
+      "tflops": null,
+      "gbps": null,
+      "frac": 0.0417,
+      "bound": "memory",
+      "util": 0.0417
+    },
+    {
+      "idx": 1,
+      "label": "{\"num_envs\": 16384, \"horizon\": 32}",
+      "ms": 0.0276,
+      "tflops": null,
+      "gbps": null,
+      "frac": 0.1265,
+      "bound": "memory",
+      "util": 0.1265
+    },
+    {
+      "idx": 2,
+      "label": "{\"num_envs\": 65536, \"horizon\": 16}",
+      "ms": 0.0356,
+      "tflops": null,
+      "gbps": null,
+      "frac": 0.1966,
+      "bound": "memory",
+      "util": 0.1966
+    },
+    {
+      "idx": 3,
+      "label": "{\"num_envs\": 8192, \"horizon\": 64}",
+      "ms": 0.0415,
+      "tflops": null,
+      "gbps": null,
+      "frac": 0.0843,
+      "bound": "memory",
+      "util": 0.0843
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "run_id": "manual_01_dequant_gemv",
+  "bench": "amd",
+  "gpu": "mi325x",
+  "problem": "01_dequant_gemv",
+  "regime": "memory",
+  "dtype": "int4_bf16",
+  "peak_tflops": 13058.0,
+  "peak_bw_gb_s": 8000.0,
+  "annotation_verdict": "clean",
+  "stats": {
+    "agent_s": null,
+    "total_s": null,
+    "check_s": null,
+    "benchmark_s": null,
+    "output_tokens": null,
+    "cost_usd": null
+  },
+  "gpu_lock": null,
+  "shapes": [
+    {
+      "idx": 0,
+      "label": "M=1 N=11008 K=4096",
+      "ms": 0.778,
+      "tflops": 0.232,
+      "gbps": 62.881,
+      "frac": 0.0079,
+      "bound": "memory",
+      "util": 0.0079,
+      "compute_util": 1.7766886200030635e-05,
+      "mem_util": 0.007860125
+    },
+    {
+      "idx": 1,
+      "label": "M=1 N=4607 K=3072",
+      "ms": 0.39,
+      "tflops": 0.145,
+      "gbps": 39.321,
+      "frac": 0.0049,
+      "bound": "memory",
+      "util": 0.0049,
+      "compute_util": 1.1104303875019144e-05,
+      "mem_util": 0.004915124999999999
+    },
+    {
+      "idx": 2,
+      "label": "M=1 N=13824 K=5120",
+      "ms": 1.111,
+      "tflops": 0.255,
+      "gbps": 69.143,
+      "frac": 0.0086,
+      "bound": "memory",
+      "util": 0.0086,
+      "compute_util": 1.9528258538826774e-05,
+      "mem_util": 0.008642875
+    },
+    {
+      "idx": 3,
+      "label": "M=4 N=8192 K=2560",
+      "ms": 0.435,
+      "tflops": 0.771,
+      "gbps": 52.469,
+      "frac": 0.0066,
+      "bound": "memory",
+      "util": 0.0066,
+      "compute_util": 5.904426405268801e-05,
+      "mem_util": 0.006558625
+    }
+  ]
+}

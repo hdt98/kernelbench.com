@@ -1,0 +1,58 @@
+{
+  "run_id": "manual_sonic_moe",
+  "bench": "amd",
+  "gpu": "mi325x",
+  "problem": "06_sonic_moe_swiglu",
+  "regime": "compute",
+  "dtype": "bf16",
+  "peak_tflops": 13058.0,
+  "peak_bw_gb_s": 8000.0,
+  "annotation_verdict": "clean",
+  "stats": {
+    "agent_s": null,
+    "total_s": null,
+    "check_s": null,
+    "benchmark_s": null,
+    "output_tokens": null,
+    "cost_usd": null
+  },
+  "gpu_lock": null,
+  "shapes": [
+    {
+      "idx": 0,
+      "label": "{\"T_total\": 32768, \"H\": 4096, \"I\": 1536, \"E\": 128, \"K\": 8}",
+      "ms": 22.384,
+      "tflops": 55.26,
+      "gbps": 160.395,
+      "frac": 0.0342,
+      "bound": "compute",
+      "util": 0.0342,
+      "compute_util": 0.004231888497472813,
+      "mem_util": 0.020049375
+    },
+    {
+      "idx": 1,
+      "label": "{\"T_total\": 4096, \"H\": 2048, \"I\": 1024, \"E\": 64, \"K\": 4}",
+      "ms": 4.287,
+      "tflops": 12.022,
+      "gbps": 131.097,
+      "frac": 0.0074,
+      "bound": "compute",
+      "util": 0.0074,
+      "compute_util": 0.0009206616633481391,
+      "mem_util": 0.016387125000000002
+    },
+    {
+      "idx": 2,
+      "label": "{\"T_total\": 16384, \"H\": 2048, \"I\": 4096, \"E\": 64, \"K\": 8}",
+      "ms": 12.908,
+      "tflops": 63.885,
+      "gbps": 181.965,
+      "frac": 0.0396,
+      "bound": "compute",
+      "util": 0.0396,
+      "compute_util": 0.004892403124521366,
+      "mem_util": 0.022745625000000002
+    }
+  ]
+}

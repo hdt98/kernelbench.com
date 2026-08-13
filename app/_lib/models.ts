@@ -110,7 +110,7 @@ export const BENCH_LABELS: Record<Bench, string> = {
 
 export const PROBLEM_LABELS: Record<string, string> = {
   "01_fp8_gemm": "FP8 GEMM",
-  "02_kda_cutlass": "KDA CUTLASS",
+  "02_kda_cutlass": "KDA",
   "03_paged_attention": "Paged Attention",
   "05_topk_bitonic": "TopK Bitonic",
   "06_sonic_moe_swiglu": "Sonic MoE",
@@ -131,7 +131,7 @@ export const PROBLEM_LABELS: Record<string, string> = {
   "03_paged_attention": "Paged Attention",
   "06_sonic_moe_swiglu": "Sonic MoE",
   "07_w4a16_gemm": "W4A16 GEMM",
-  "02_kda_cutlass": "KDA CUTLASS",
+  "02_kda_cutlass": "KDA",
 }
 
 /** Mega is the single Kimi-Linear megakernel cell. `01_rl_grid_ppo` was removed

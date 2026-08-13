@@ -6,6 +6,6 @@ export default function robots(): MetadataRoute.Robots {
       userAgent: "*",
       allow: "/",
     },
-    sitemap: "https://nexuskernel.com/sitemap.xml",
+    sitemap: "https://kernelbench.com/sitemap.xml",
   }
 }

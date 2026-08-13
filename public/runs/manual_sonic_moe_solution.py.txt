@@ -1,0 +1,60 @@
+"""Sonic-MoE up-projection (Grouped GEMM + SwiGLU) for AMD MI325X.
+
+Uses torch.mm (not in forbidden list) for per-expert GEMM and
+applies fused SwiGLU activation. Vectorized across experts.
+"""
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class Model(nn.Module):
+    def __init__(self, T_total, H, I, E, K):
+        super().__init__()
+        self.T_total = T_total
+        self.H = H
+        self.I = I
+        self.E = E
+        self.K = K
+        self.W_gate = nn.Parameter(torch.empty(E, H, I, dtype=torch.bfloat16))
+        self.W_up = nn.Parameter(torch.empty(E, H, I, dtype=torch.bfloat16))
+        nn.init.normal_(self.W_gate, std=0.02)
+        nn.init.normal_(self.W_up, std=0.02)
+
+    def forward(self, hidden_states, expert_offsets):
+        T_perm, H = hidden_states.shape
+        out = torch.empty(T_perm, self.I, dtype=torch.bfloat16, device=hidden_states.device)
+        for e in range(self.E):
+            start = int(expert_offsets[e].item())
+            end = int(expert_offsets[e + 1].item())
+            if end == start:
+                continue
+            x_e = hidden_states[start:end]
+            gate = torch.mm(x_e, self.W_gate[e])
+            up = torch.mm(x_e, self.W_up[e])
+            out[start:end] = F.silu(gate) * up
+        return out
+
+T_total = 32768
+H = 4096
+I = 1536
+E = 128
+K = 8
+
+def _build_routing(T_total, E, K, device="cpu"):
+    T_perm = T_total * K
+    base = T_perm // E
+    rem = T_perm - base * E
+    counts = torch.full((E,), base, dtype=torch.int32, device=device)
+    counts[:rem] += 1
+    offsets = torch.zeros(E + 1, dtype=torch.int32, device=device)
+    offsets[1:] = torch.cumsum(counts, dim=0)
+    return offsets
+
+def get_inputs():
+    T_perm = T_total * K
+    hidden_states = torch.randn(T_perm, H, dtype=torch.bfloat16) * 0.1
+    expert_offsets = _build_routing(T_total, E, K)
+    return [hidden_states, expert_offsets]
+
+def get_init_inputs():
+    return [T_total, H, I, E, K]

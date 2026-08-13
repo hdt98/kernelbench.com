@@ -1,0 +1,82 @@
+{
+  "run_id": "manual_flash_attn",
+  "bench": "amd",
+  "gpu": "mi325x",
+  "problem": "04_flash_attention",
+  "regime": "compute",
+  "dtype": "bf16",
+  "peak_tflops": 13058.0,
+  "peak_bw_gb_s": 8000.0,
+  "annotation_verdict": "clean",
+  "stats": {
+    "agent_s": null,
+    "total_s": null,
+    "check_s": null,
+    "benchmark_s": null,
+    "output_tokens": null,
+    "cost_usd": null
+  },
+  "gpu_lock": null,
+  "shapes": [
+    {
+      "idx": 0,
+      "label": "{\"B\": 1, \"H\": 32, \"S\": 4096, \"D\": 128}",
+      "ms": 1.328,
+      "tflops": 103.51,
+      "gbps": 101.084,
+      "frac": 0.0641,
+      "bound": "compute",
+      "util": 0.0641,
+      "compute_util": 0.007926941338642978,
+      "mem_util": 0.012635500000000001
+    },
+    {
+      "idx": 1,
+      "label": "{\"B\": 1, \"H\": 32, \"S\": 4097, \"D\": 128}",
+      "ms": 1.256,
+      "tflops": 109.488,
+      "gbps": 106.896,
+      "frac": 0.0678,
+      "bound": "compute",
+      "util": 0.0678,
+      "compute_util": 0.008384744983917905,
+      "mem_util": 0.013362
+    },
+    {
+      "idx": 2,
+      "label": "{\"B\": 4, \"H\": 8, \"S\": 8192, \"D\": 128}",
+      "ms": 4.792,
+      "tflops": 114.717,
+      "gbps": 56.014,
+      "frac": 0.0711,
+      "bound": "compute",
+      "util": 0.0711,
+      "compute_util": 0.008785189156072905,
+      "mem_util": 0.00700175
+    },
+    {
+      "idx": 3,
+      "label": "{\"B\": 8, \"H\": 16, \"S\": 2048, \"D\": 64}",
+      "ms": 0.929,
+      "tflops": 74.007,
+      "gbps": 144.546,
+      "frac": 0.0458,
+      "bound": "compute",
+      "util": 0.0458,
+      "compute_util": 0.005667560116403738,
+      "mem_util": 0.018068249999999998
+    },
+    {
+      "idx": 4,
+      "label": "{\"B\": 1, \"H\": 8, \"S\": 16384, \"D\": 128}",
+      "ms": 4.85,
+      "tflops": 113.357,
+      "gbps": 27.675,
+      "frac": 0.0702,
+      "bound": "compute",
+      "util": 0.0702,
+      "compute_util": 0.00868103844386583,
+      "mem_util": 0.003459375
+    }
+  ]
+}

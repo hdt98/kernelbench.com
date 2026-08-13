@@ -1,0 +1,81 @@
+{
+  "run_id": "manual_topk",
+  "bench": "amd",
+  "gpu": "mi325x",
+  "problem": "05_topk_bitonic",
+  "regime": "memory",
+  "dtype": "fp32",
+  "peak_tflops": 3270.0,
+  "peak_bw_gb_s": 8000.0,
+  "annotation_verdict": "clean",
+  "stats": {
+    "agent_s": null,
+    "total_s": null,
+    "check_s": null,
+    "benchmark_s": null,
+    "output_tokens": null,
+    "cost_usd": null
+  },
+  "gpu_lock": null,
+  "shapes": [
+    {
+      "idx": 0,
+      "label": "{\"batch\": 1,   \"n\": 131072, \"k\": 64}",
+      "ms": 4.057,
+      "tflops": 0.0,
+      "gbps": 0.129,
+      "frac": 0.0,
+      "bound": "memory",
+      "util": 0.0,
+      "mem_util": 1.6125e-05
+    },
+    {
+      "idx": 1,
+      "label": "{\"batch\": 64,  \"n\": 8192,   \"k\": 8}",
+      "ms": 0.03,
+      "tflops": 0.07,
+      "gbps": 69.877,
+      "frac": 0.0087,
+      "bound": "memory",
+      "util": 0.0087,
+      "compute_util": 2.140672782874618e-05,
+      "mem_util": 0.008734625
+    },
+    {
+      "idx": 2,
+      "label": "{\"batch\": 32,  \"n\": 16384,  \"k\": 32}",
+      "ms": 0.08,
+      "tflops": 0.026,
+      "gbps": 26.415,
+      "frac": 0.0033,
+      "bound": "memory",
+      "util": 0.0033,
+      "compute_util": 7.951070336391438e-06,
+      "mem_util": 0.0033018749999999997
+    },
+    {
+      "idx": 3,
+      "label": "{\"batch\": 16,  \"n\": 12000,  \"k\": 16}",
+      "ms": 0.046,
+      "tflops": 0.017,
+      "gbps": 16.604,
+      "frac": 0.0021,
+      "bound": "memory",
+      "util": 0.0021,
+      "compute_util": 5.198776758409786e-06,
+      "mem_util": 0.0020755
+    },
+    {
+      "idx": 4,
+      "label": "{\"batch\": 128, \"n\": 4096,   \"k\": 1}",
+      "ms": 0.016,
+      "tflops": 0.132,
+      "gbps": 132.159,
+      "frac": 0.0165,
+      "bound": "memory",
+      "util": 0.0165,
+      "compute_util": 4.036697247706422e-05,
+      "mem_util": 0.016519875
+    }
+  ]
+}

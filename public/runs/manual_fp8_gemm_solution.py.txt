@@ -1,0 +1,131 @@
+"""FP8 e4m3 GEMM — hybrid Triton + raw MFMA on AMD MI325X (gfx942, CDNA 3).
+
+Triton FP8 tl.dot (e4m3fnuz reinterpretation, hardware MFMA) with
+software pipelining for large M. Shape-adaptive tile configs.
+Raw HIP MFMA kernel for small M (shape 2) with split-K.
+Triton epilogue kernel for fused scale+cast. Cached buffers.
+"""
+import torch, torch.nn as nn, triton, triton.language as tl, os, ctypes
+os.environ.setdefault("PYTORCH_ROCM_ARCH", "gfx942")
+
+@triton.jit
+def fp8_gemm_kernel(a_ptr, b_ptr, c_ptr, scale_ptr, M, N, K,
+                    sam, sak, sbk, sbn, scm, scn,
+                    BM: tl.constexpr, BN: tl.constexpr, BK: tl.constexpr, GM: tl.constexpr,
+                    NPM: tl.constexpr, NPN: tl.constexpr):
+    pid = tl.program_id(0)
+    gid = pid // (GM * NPN); fpm = gid * GM; gsm = min(NPM - fpm, GM)
+    pm = fpm + (pid % gsm); pn = (pid % (GM * NPN)) // gsm
+    om = pm * BM + tl.arange(0, BM); on = pn * BN + tl.arange(0, BN); ok = tl.arange(0, BK)
+    ap = a_ptr + om[:, None] * sam + ok[None, :] * sak
+    bp = b_ptr + ok[:, None] * sbk + on[None, :] * sbn
+    acc = tl.zeros((BM, BN), dtype=tl.float32)
+    for ks in range(0, K, BK):
+        a = tl.load(ap, mask=(ok[None, :] + ks) < K, other=0.0)
+        b = tl.load(bp, mask=(ok[:, None] + ks) < K, other=0.0)
+        acc += tl.dot(a, b); ap += BK * sak; bp += BK * sbk
+    sc = tl.load(scale_ptr + on, mask=on < N, other=0.0)
+    acc = acc * 4.0 * sc[None, :]
+    cp = c_ptr + om[:, None] * scm + on[None, :] * scn
+    tl.store(cp, acc.to(tl.bfloat16), mask=(om[:, None] < M) & (on[None, :] < N))
+
+@triton.jit
+def scale_cast_kernel(in_ptr, out_ptr, scale_ptr, total, N, BLOCK: tl.constexpr):
+    pid = tl.program_id(0)
+    offs = pid * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < total
+    val = tl.load(in_ptr + offs, mask=mask, other=0.0)
+    col = offs % N
+    sc = tl.load(scale_ptr + col, mask=mask, other=0.0)
+    tl.store(out_ptr + offs, (val * sc).to(tl.bfloat16), mask=mask)
+
+_D = os.path.dirname(os.path.abspath(__file__))
+_TORCH_LIB = os.path.join(os.path.dirname(os.path.dirname(torch.__file__)), "lib")
+try:
+    ctypes.CDLL(os.path.join(_TORCH_LIB, "libamdhip64.so"), mode=ctypes.RTLD_GLOBAL)
+except OSError: pass
+_mfma = ctypes.CDLL(os.path.join(_D, "libmfma_fp8_gemm.so"))
+_mfma.mfma_fp8_gemm.restype = ctypes.c_int
+_mfma.mfma_fp8_gemm.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p]
+_NULL_PTR = ctypes.c_void_p(0)
+_NUM_CU = 304
+def _split_k(M, N, K):
+    bm = 64 if M <= 32 else 128; bn = 128
+    base = ((M+bm-1)//bm)*((N+bn-1)//bn); target = _NUM_CU*2
+    return 1 if base >= target else max(1, min((target+base-1)//base, 8))
+
+def _san(t):
+    u8 = t.view(torch.uint8)
+    return torch.where(u8 == 0x80, torch.zeros((), dtype=torch.uint8, device=t.device), u8).view(torch.float8_e4m3fnuz)
+
+class Model(nn.Module):
+    def __init__(self, M, N, K):
+        super().__init__()
+        self.M, self.N, self.K = M, N, K
+        E4M3_MAX = 448.0
+        w = torch.empty(N, K, dtype=torch.bfloat16)
+        nn.init.normal_(w, std=0.02)
+        s = (w.float().abs().amax(dim=1, keepdim=True) / E4M3_MAX).clamp(min=1e-12)
+        w_fp8 = (w.float() / s).to(torch.float8_e4m3fn)
+        self.register_buffer("weight", w_fp8)
+        self.register_buffer("weight_scale", s.squeeze(1).to(torch.float32))
+        self._wt = None; self._wt_ver = -1
+        self._f32_buf = None
+        self._bf16_buf = None
+        self._stream = None
+    def forward(self, x):
+        M, N, K = x.shape[0], self.N, self.K
+        if M <= 32:
+            sk = _split_k(M, N, K)
+            if self._stream is None:
+                self._stream = torch.cuda.current_stream().cuda_stream
+            stream = self._stream
+            if sk == 1:
+                if self._bf16_buf is None or self._bf16_buf.shape[0] != M:
+                    self._bf16_buf = torch.empty(M, N, dtype=torch.bfloat16, device=x.device)
+                y = self._bf16_buf
+                ret = _mfma.mfma_fp8_gemm(x.data_ptr(), self.weight.data_ptr(), y.data_ptr(),
+                    M, N, K, sk, self.weight_scale.data_ptr(), stream)
+                if ret != 0: raise RuntimeError(f"MFMA failed (ret={ret})")
+                return y
+            else:
+                if self._f32_buf is None or self._f32_buf.shape[0] != M:
+                    self._f32_buf = torch.zeros(M, N, dtype=torch.float32, device=x.device)
+                else:
+                    self._f32_buf.zero_()
+                if self._bf16_buf is None or self._bf16_buf.shape[0] != M:
+                    self._bf16_buf = torch.empty(M, N, dtype=torch.bfloat16, device=x.device)
+                out = self._f32_buf
+                ret = _mfma.mfma_fp8_gemm(x.data_ptr(), self.weight.data_ptr(), out.data_ptr(),
+                    M, N, K, sk, _NULL_PTR, stream)
+                if ret != 0: raise RuntimeError(f"MFMA failed (ret={ret})")
+                y = self._bf16_buf
+                total = M * N
+                BLOCK = 8192
+                grid = (triton.cdiv(total, BLOCK),)
+                scale_cast_kernel[grid](out, y, self.weight_scale, total, N, BLOCK=BLOCK, num_warps=2)
+                return y
+        xf = _san(x)
+        v = self.weight._version
+        if self._wt is None or v != self._wt_ver:
+            self._wt = _san(self.weight).t().contiguous(); self._wt_ver = v
+        wt = self._wt
+        y = torch.empty(M, N, dtype=torch.bfloat16, device=x.device)
+        if K % 128 != 0:
+            BM, BN, BK, nw, ns, gm = 128, 256, 64, 8, 3, 8
+        else:
+            BM, BN, BK, nw, ns, gm = 128, 128, 64, 4, 3, 4
+        npm = (M + BM - 1) // BM; npn = (N + BN - 1) // BN
+        grid = (npm * npn,)
+        fp8_gemm_kernel[grid](xf, wt, y, self.weight_scale, M, N, K,
+            xf.stride(0), xf.stride(1), wt.stride(0), wt.stride(1),
+            y.stride(0), y.stride(1), BM=BM, BN=BN, BK=BK, GM=gm,
+            NPM=npm, NPN=npn, num_warps=nw, num_stages=ns)
+        return y
+
+M = 4096; N = 4096; K = 4096
+def get_inputs():
+    return [(torch.rand(M, K) * 8 - 4).to(torch.float8_e4m3fn)]
+def get_init_inputs():
+    return [M, N, K]

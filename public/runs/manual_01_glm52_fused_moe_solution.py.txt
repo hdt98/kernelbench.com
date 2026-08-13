@@ -1,0 +1,67 @@
+"""GLM-5.2 fused MoE layer for AMD MI325X.
+
+Matches reference: Model(T, E, top_k, n_shared, H, I).
+Uses torch.mm for GEMM, F.silu for activation. Shared + routed experts.
+"""
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+OP_TYPE = "glm52_fused_moe"
+SUPPORTED_PRECISIONS = ["bf16"]
+HARDWARE_REQUIRED = ["MI325X"]
+
+
+def _silu_mul_down(x, w1, w2):
+    I_half = w1.shape[0] // 2
+    gate = torch.mm(x, w1[:I_half].T)
+    up = torch.mm(x, w1[I_half:].T)
+    h = F.silu(gate) * up
+    return torch.mm(h, w2.T)
+
+
+class Model(nn.Module):
+    def __init__(self, T, E, top_k, n_shared, H, I):
+        super().__init__()
+        self.T, self.E, self.top_k = T, E, top_k
+        self.n_shared, self.H, self.I = n_shared, H, I
+        self.w1_routed = nn.Parameter(torch.empty(E, 2 * I, H, dtype=torch.bfloat16))
+        self.w2_routed = nn.Parameter(torch.empty(E, H, I, dtype=torch.bfloat16))
+        self.w1_shared = nn.Parameter(torch.empty(n_shared, 2 * I, H, dtype=torch.bfloat16))
+        self.w2_shared = nn.Parameter(torch.empty(n_shared, H, I, dtype=torch.bfloat16))
+        for p in self.parameters():
+            p.data.zero_()
+
+    def forward(self, x, expert_ids, expert_weights):
+        T, H = x.shape
+        out = torch.zeros(T, H, device=x.device, dtype=torch.float32)
+        xf = x.float()
+        for s in range(self.n_shared):
+            out = out + _silu_mul_down(xf, self.w1_shared[s].float(), self.w2_shared[s].float())
+        wts = expert_weights.float()
+        for e in range(self.E):
+            mask = expert_ids == e
+            if not mask.any():
+                continue
+            token_idx, k_idx = mask.nonzero(as_tuple=True)
+            x_e = xf[token_idx]
+            w_e = wts[token_idx, k_idx]
+            y = _silu_mul_down(x_e, self.w1_routed[e].float(), self.w2_routed[e].float())
+            out.index_add_(0, token_idx, y * w_e.unsqueeze(1))
+        return out.to(torch.bfloat16)
+
+
+T, E, top_k, n_shared, H, I = 4096, 256, 8, 1, 4096, 2048
+
+
+def get_init_inputs():
+    return [T, E, top_k, n_shared, H, I]
+
+
+def get_inputs():
+    x = torch.randn(T, H, dtype=torch.bfloat16)
+    logits = torch.randn(T, E) + torch.linspace(0.3, 0.0, E).unsqueeze(0)
+    vals, ids = torch.topk(logits, k=top_k, dim=-1)
+    weights = torch.softmax(vals, dim=-1).to(torch.bfloat16)
+    return [x, ids.to(torch.int64), weights]
+

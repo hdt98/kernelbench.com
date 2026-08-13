@@ -1,0 +1,70 @@
+{
+  "run_id": "manual_02_kda_cutlass",
+  "bench": "amd",
+  "gpu": "mi325x",
+  "problem": "02_kda_cutlass",
+  "regime": "compute",
+  "dtype": "bf16",
+  "peak_tflops": 13058.0,
+  "peak_bw_gb_s": 8000.0,
+  "annotation_verdict": "clean",
+  "stats": {
+    "agent_s": null,
+    "total_s": null,
+    "check_s": null,
+    "benchmark_s": null,
+    "output_tokens": null,
+    "cost_usd": null
+  },
+  "gpu_lock": null,
+  "shapes": [
+    {
+      "idx": 0,
+      "label": "{\"B\": 2, \"T\": 1024, \"H\": 8, \"K\": 128, \"V\": 128, \"CHUNK_SIZE\"",
+      "ms": 4.917,
+      "tflops": 0.002,
+      "gbps": 2.559,
+      "frac": 0.0,
+      "bound": "compute",
+      "util": 0.0,
+      "compute_util": 1.531628120692296e-07,
+      "mem_util": 0.000319875
+    },
+    {
+      "idx": 1,
+      "label": "{\"B\": 2, \"T\": 2048, \"H\": 8, \"K\": 128, \"V\": 128, \"CHUNK_SIZE\"",
+      "ms": 7.504,
+      "tflops": 0.002,
+      "gbps": 3.354,
+      "frac": 0.0,
+      "bound": "compute",
+      "util": 0.0,
+      "compute_util": 1.531628120692296e-07,
+      "mem_util": 0.00041925
+    },
+    {
+      "idx": 2,
+      "label": "{\"B\": 1, \"T\": 4096, \"H\": 8, \"K\": 128, \"V\": 128, \"CHUNK_SIZE\"",
+      "ms": 13.068,
+      "tflops": 0.001,
+      "gbps": 1.926,
+      "frac": 0.0,
+      "bound": "compute",
+      "util": 0.0,
+      "compute_util": 7.65814060346148e-08,
+      "mem_util": 0.00024075
+    },
+    {
+      "idx": 3,
+      "label": "{\"B\": 1, \"T\": 2048, \"H\": 4, \"K\": 128, \"V\": 128, \"CHUNK_SIZE\"",
+      "ms": 8.033,
+      "tflops": 0.001,
+      "gbps": 0.783,
+      "frac": 0.0,
+      "bound": "compute",
+      "util": 0.0,
+      "compute_util": 7.65814060346148e-08,
+      "mem_util": 9.787500000000001e-05
+    }
+  ]
+}

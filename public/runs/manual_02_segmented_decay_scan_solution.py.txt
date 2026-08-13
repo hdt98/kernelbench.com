@@ -1,0 +1,96 @@
+"""Segmented exponential-decay scan via Triton on AMD MI325X.
+
+The recurrence h_t = decay_t * h_{t-1} + x_t (with reset = decay becomes 0)
+is inherently sequential over T. We parallelize over B and D, and process
+T sequentially within each program using a runtime loop.
+"""
+import torch
+import torch.nn as nn
+import triton
+import triton.language as tl
+
+OP_TYPE = "segmented_decay_scan"
+SUPPORTED_PRECISIONS = ["bf16"]
+HARDWARE_REQUIRED = ["MI325X"]
+
+
+@triton.jit
+def segmented_scan_kernel(
+    x_ptr, decay_ptr, resets_ptr, out_ptr,
+    T, D,
+    stride_xb, stride_xt, stride_xd,
+    stride_db, stride_dt, stride_dd,
+    stride_rb, stride_rt,
+    stride_ob, stride_ot, stride_od,
+    BLOCK_D: tl.constexpr,
+):
+    b = tl.program_id(0)
+    d_block = tl.program_id(1)
+
+    d_offs = tl.arange(0, BLOCK_D) + d_block * BLOCK_D
+    d_mask = d_offs < D
+
+    h = tl.zeros((BLOCK_D,), dtype=tl.float32)
+
+    for t in range(T):
+        x_t = tl.load(
+            x_ptr + b * stride_xb + t * stride_xt + d_offs * stride_xd,
+            mask=d_mask, other=0.0,
+        ).to(tl.float32)
+        decay_t = tl.load(
+            decay_ptr + b * stride_db + t * stride_dt + d_offs * stride_dd,
+            mask=d_mask, other=0.0,
+        )
+        reset_t = tl.load(resets_ptr + b * stride_rb + t * stride_rt)
+        keep = 1.0 - reset_t.to(tl.float32)
+        h = keep * decay_t * h + x_t
+        tl.store(
+            out_ptr + b * stride_ob + t * stride_ot + d_offs * stride_od,
+            h.to(tl.bfloat16), mask=d_mask,
+        )
+
+
+class Model(nn.Module):
+    def __init__(self, B: int, T: int, D: int):
+        super().__init__()
+        self.B, self.T, self.D = B, T, D
+        self.register_buffer("_dummy", torch.zeros(1, dtype=torch.bfloat16))
+
+    def forward(
+        self, x: torch.Tensor, decay: torch.Tensor, resets: torch.Tensor
+    ) -> torch.Tensor:
+        B, T, D = x.shape
+        out = torch.empty_like(x)
+        BLOCK_D = 128
+        if D < BLOCK_D:
+            BLOCK_D = triton.next_power_of_2(D)
+        num_d_blocks = triton.cdiv(D, BLOCK_D)
+        segmented_scan_kernel[(B, num_d_blocks)](
+            x, decay, resets, out,
+            T, D,
+            x.stride(0), x.stride(1), x.stride(2),
+            decay.stride(0), decay.stride(1), decay.stride(2),
+            resets.stride(0), resets.stride(1),
+            out.stride(0), out.stride(1), out.stride(2),
+            BLOCK_D=BLOCK_D,
+            num_warps=4,
+        )
+        return out
+
+
+B = 8
+T = 4096
+D = 2048
+RESET_PROB = 1.0 / 64.0
+
+
+def get_inputs():
+    x = torch.randn(B, T, D, dtype=torch.bfloat16)
+    decay = torch.rand(B, T, D, dtype=torch.float32) * 0.945 + 0.05
+    resets = torch.rand(B, T) < RESET_PROB
+    return [x, decay, resets]
+
+
+def get_init_inputs():
+    return [B, T, D]
+

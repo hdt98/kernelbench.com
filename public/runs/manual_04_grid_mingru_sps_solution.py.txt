@@ -1,0 +1,181 @@
+"""Grid + 3xMinGRU SPS via Triton on AMD MI325X.
+
+Uses a Triton kernel for the GRU gate fusion (sigmoid gating + highway).
+tanh is computed in PyTorch (matching reference precision on gfx942).
+env_step uses PyTorch (must match reference exactly for LCG).
+"""
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import triton
+import triton.language as tl
+
+OP_TYPE = "grid_mingru_sps"
+SUPPORTED_PRECISIONS = ["fp32"]
+HARDWARE_REQUIRED = ["MI325X"]
+
+BOARD = 11
+OBS_DIM = 4
+HIDDEN = 256
+GRU_LAYERS = 3
+NUM_ACTIONS = 4
+GRU_OUT = 3 * HIDDEN
+
+
+@triton.jit
+def _gru_gate_kernel(
+    gzh_ptr, zg_ptr, zp_ptr, st_ptr, h_ptr, out_ptr, hnew_ptr,
+    N, H: tl.constexpr, BLOCK_N: tl.constexpr,
+):
+    n_block = tl.program_id(0)
+    n_offs = tl.arange(0, BLOCK_N) + n_block * BLOCK_N
+    n_mask = n_offs < N
+    off_h = tl.arange(0, H)
+
+    gzh = tl.load(gzh_ptr + n_offs[:, None] * H + off_h[None, :], mask=n_mask[:, None], other=0.0)
+    zg = tl.load(zg_ptr + n_offs[:, None] * H + off_h[None, :], mask=n_mask[:, None], other=0.0)
+    zp = tl.load(zp_ptr + n_offs[:, None] * H + off_h[None, :], mask=n_mask[:, None], other=0.0)
+    st = tl.load(st_ptr + n_offs[:, None] * H + off_h[None, :], mask=n_mask[:, None], other=0.0)
+    h_val = tl.load(h_ptr + n_offs[:, None] * H + off_h[None, :], mask=n_mask[:, None], other=0.0)
+
+    sig_zg = 1.0 / (1.0 + tl.exp(-zg))
+    out = st + sig_zg * (gzh - st)
+    sig_zp = 1.0 / (1.0 + tl.exp(-zp))
+    h_new = sig_zp * out + (1.0 - sig_zp) * h_val
+
+    tl.store(out_ptr + n_offs[:, None] * H + off_h[None, :], out, mask=n_mask[:, None])
+    tl.store(hnew_ptr + n_offs[:, None] * H + off_h[None, :], h_new, mask=n_mask[:, None])
+
+
+def _triton_gru_gate(gates, st, h):
+    N = gates.shape[0]
+    H = HIDDEN
+    zh, zg, zp = gates.split(H, dim=-1)
+    # tanh in PyTorch for accuracy; .contiguous() so kernel stride = H
+    g_zh = torch.tanh(zh)
+    zg_c = zg.contiguous()
+    zp_c = zp.contiguous()
+    st_c = st.contiguous()
+    h_c = h.contiguous()
+    try:
+        out = torch.empty(N, H, device=gates.device, dtype=gates.dtype)
+        hnew = torch.empty(N, H, device=gates.device, dtype=gates.dtype)
+        BLOCK_N = min(256, triton.next_power_of_2(N))
+        grid = (triton.cdiv(N, BLOCK_N),)
+        _gru_gate_kernel[grid](g_zh, zg_c, zp_c, st_c, h_c, out, hnew, N, H, BLOCK_N)
+        return out, hnew
+    except Exception:
+        out = st + torch.sigmoid(zg) * (g_zh - st)
+        p = torch.sigmoid(zp)
+        hnew = p * out + (1.0 - p) * h
+        return out, hnew
+
+
+class Model(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.w_enc = nn.Parameter(torch.empty(HIDDEN, OBS_DIM))
+        self.b_enc = nn.Parameter(torch.zeros(HIDDEN))
+        self.w_gru = nn.Parameter(torch.empty(GRU_LAYERS, GRU_OUT, HIDDEN))
+        self.w_a = nn.Parameter(torch.empty(NUM_ACTIONS, HIDDEN))
+        self.b_a = nn.Parameter(torch.zeros(NUM_ACTIONS))
+        self.w_v = nn.Parameter(torch.empty(1, HIDDEN))
+        self.b_v = nn.Parameter(torch.zeros(1))
+        self.reset_parameters(0)
+
+    def reset_parameters(self, seed=0):
+        g = torch.Generator(device="cpu")
+        g.manual_seed(seed)
+        for p in self.parameters():
+            tmp = torch.empty(p.shape, dtype=p.dtype, device="cpu")
+            tmp.normal_(0.0, 0.02, generator=g)
+            p.data.copy_(tmp)
+
+    def forward(self, obs, state):
+        return policy_forward(self, obs, state)
+
+
+def policy_forward(model, obs, state):
+    h_enc = F.linear(obs, model.w_enc, model.b_enc)
+    new_states = []
+    h = h_enc
+    for layer in range(GRU_LAYERS):
+        st = state[:, layer, :]
+        gates = F.linear(h, model.w_gru[layer])
+        out, h = _triton_gru_gate(gates, st, h)
+        new_states.append(out)
+    new_state = torch.stack(new_states, dim=1)
+    logits = F.linear(h, model.w_a, model.b_a)
+    value = F.linear(h, model.w_v, model.b_v).squeeze(-1)
+    return logits, new_state, value
+
+
+def obs_from_state(agent, food):
+    return torch.stack([
+        (food[:, 0] - agent[:, 0]) / BOARD,
+        (food[:, 1] - agent[:, 1]) / BOARD,
+        agent[:, 0] / (BOARD - 1),
+        agent[:, 1] / (BOARD - 1),
+    ], dim=-1)
+
+
+def _lcg_step(rng):
+    return (rng * 6364136223846793005 + 1) & 0x7FFFFFFFFFFFFFFF
+
+
+def env_step(agent, food, actions, rng_state):
+    delta = torch.zeros_like(agent)
+    delta[:, 1] = torch.where(actions == 0, -torch.ones_like(delta[:, 1]), delta[:, 1])
+    delta[:, 1] = torch.where(actions == 1, torch.ones_like(delta[:, 1]), delta[:, 1])
+    delta[:, 0] = torch.where(actions == 2, -torch.ones_like(delta[:, 0]), delta[:, 0])
+    delta[:, 0] = torch.where(actions == 3, torch.ones_like(delta[:, 0]), delta[:, 0])
+    agent = (agent + delta).clamp(0, BOARD - 1)
+    hit = (agent == food).all(dim=-1)
+    reward = hit.float()
+    rng_state = rng_state.clone()
+    if hit.any():
+        rng_state = _lcg_step(rng_state)
+        fx = (rng_state % BOARD).to(agent.dtype)
+        rng_state = _lcg_step(rng_state)
+        fy = (rng_state % BOARD).to(agent.dtype)
+        new_food = torch.stack([fx, fy], dim=-1)
+        food = food.clone()
+        food[hit] = new_food[hit]
+    return agent, food, reward, rng_state
+
+
+def run(num_envs, horizon, seed, model=None):
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    if model is None:
+        model = Model()
+    model = model.to(device).eval()
+    g = torch.Generator(device="cpu")
+    g.manual_seed(seed)
+    agent = torch.randint(0, BOARD, (num_envs, 2), generator=g).float().to(device)
+    food = torch.randint(0, BOARD, (num_envs, 2), generator=g).float().to(device)
+    rng_state = torch.arange(num_envs, device=device, dtype=torch.int64) + (seed * 10007)
+    state = torch.zeros(num_envs, GRU_LAYERS, HIDDEN, device=device)
+    rewards = torch.zeros(num_envs, device=device)
+    last_logits = torch.zeros(num_envs, NUM_ACTIONS, device=device)
+    with torch.no_grad():
+        for _t in range(horizon):
+            obs = obs_from_state(agent, food)
+            logits, state, _value = policy_forward(model, obs, state)
+            last_logits = logits
+            actions = torch.argmax(logits, dim=-1)
+            agent, food, r, rng_state = env_step(agent, food, actions, rng_state)
+            rewards = rewards + r
+    return {
+        "rewards": rewards.detach(),
+        "positions": agent.detach().round().long(),
+        "last_logits": last_logits.detach(),
+        "state": state.detach(),
+    }
+
+
+def get_init_inputs():
+    return []
+
+
+def get_inputs():
+    return []

@@ -1,0 +1,32 @@
+{
+  "run_id": "manual_03_megaqwen_decode",
+  "bench": "amd",
+  "gpu": "mi325x",
+  "problem": "03_megaqwen_decode",
+  "regime": "throughput",
+  "dtype": "bf16",
+  "peak_tflops": 13058.0,
+  "peak_bw_gb_s": 8000.0,
+  "annotation_verdict": "clean",
+  "stats": {
+    "agent_s": null,
+    "total_s": null,
+    "check_s": null,
+    "benchmark_s": null,
+    "output_tokens": null,
+    "cost_usd": null
+  },
+  "gpu_lock": null,
+  "shapes": [
+    {
+      "idx": 0,
+      "label": "{\"ctx_len\": 2048, \"decode_steps\": 64}",
+      "ms": null,
+      "tflops": null,
+      "gbps": null,
+      "frac": 0.0078,
+      "bound": "memory",
+      "util": 0.0078
+    }
+  ]
+}

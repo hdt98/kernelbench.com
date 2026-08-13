@@ -1,0 +1,70 @@
+{
+  "run_id": "manual_02_segmented_decay_scan",
+  "bench": "amd",
+  "gpu": "mi325x",
+  "problem": "02_segmented_decay_scan",
+  "regime": "memory",
+  "dtype": "bf16",
+  "peak_tflops": 13058.0,
+  "peak_bw_gb_s": 8000.0,
+  "annotation_verdict": "clean",
+  "stats": {
+    "agent_s": null,
+    "total_s": null,
+    "check_s": null,
+    "benchmark_s": null,
+    "output_tokens": null,
+    "cost_usd": null
+  },
+  "gpu_lock": null,
+  "shapes": [
+    {
+      "idx": 0,
+      "label": "{\"B\": 8, \"T\": 4096, \"D\": 2048}",
+      "ms": 1.751,
+      "tflops": 0.115,
+      "gbps": 306.678,
+      "frac": 0.0383,
+      "bound": "memory",
+      "util": 0.0383,
+      "compute_util": 8.806861693980703e-06,
+      "mem_util": 0.03833475
+    },
+    {
+      "idx": 1,
+      "label": "{\"B\": 4, \"T\": 8191, \"D\": 1024}",
+      "ms": 3.366,
+      "tflops": 0.03,
+      "gbps": 79.758,
+      "frac": 0.01,
+      "bound": "memory",
+      "util": 0.01,
+      "compute_util": 2.2974421810384437e-06,
+      "mem_util": 0.00996975
+    },
+    {
+      "idx": 2,
+      "label": "{\"B\": 16, \"T\": 2048, \"D\": 4096}",
+      "ms": 1.015,
+      "tflops": 0.397,
+      "gbps": 1058.404,
+      "frac": 0.1323,
+      "bound": "memory",
+      "util": 0.1323,
+      "compute_util": 3.0402818195742076e-05,
+      "mem_util": 0.1323005
+    },
+    {
+      "idx": 3,
+      "label": "{\"B\": 1, \"T\": 16384, \"D\": 512}",
+      "ms": 6.607,
+      "tflops": 0.004,
+      "gbps": 10.159,
+      "frac": 0.0013,
+      "bound": "memory",
+      "util": 0.0013,
+      "compute_util": 3.063256241384592e-07,
+      "mem_util": 0.0012698750000000002
+    }
+  ]
+}
