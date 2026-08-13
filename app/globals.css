@@ -4966,3 +4966,17 @@ pre[class*="language-"] {
 }
 .prob-sota, .prob-approach { font-size: 0.75rem; color: var(--color-fg-muted); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .problem-detail-sota { color: var(--color-fg-muted); font-size: 0.9rem; line-height: 1.5; margin: 0; }
+
+/* Model leaderboard and matrix cells */
+.rank-cell { font-weight: 600; color: var(--color-fg-bright); }
+.model-name { font-weight: 500; color: var(--color-fg-bright); }
+.model-harness { color: var(--color-fg-muted); font-size: 0.85em; }
+.th-model { white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.cell-link { text-decoration: none; color: inherit; }
+.cell-link:hover { text-decoration: underline; color: var(--color-accent); }
+.cell-empty { color: var(--color-fg-muted); opacity: 0.4; }
+.cell-pass-noperf { color: var(--color-fg-muted); font-size: 0.85em; }
+.cell-good { background: rgba(46, 204, 113, 0.12); }
+.cell-ok { background: rgba(52, 152, 219, 0.10); }
+.cell-low { background: rgba(241, 196, 15, 0.08); }
+.cell-vlow { background: rgba(231, 76, 60, 0.06); }

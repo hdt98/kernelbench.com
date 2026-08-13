@@ -105,6 +105,45 @@ export default async function HomePage() {
       </section>
 
       <section className="leaderboard-section">
+        <h2 className="section-title">Model Leaderboard</h2>
+        <div className="leaderboard-table-wrap">
+          <table className="leaderboard-table">
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Model</th>
+                <th>Harness</th>
+                <th className="th-num">Pass</th>
+                <th className="th-num">Geomean Peak</th>
+              </tr>
+            </thead>
+            <tbody>
+              {leaderboard.models.map((m, i) => {
+                const modelPasses = leaderboard.problems.filter(
+                  (p) => m.results[p]?.correct && m.results[p]?.peak_fraction != null
+                )
+                const modelPeaks = modelPasses
+                  .map((p) => m.results[p].peak_fraction)
+                  .filter((v): v is number => v != null && v > 0)
+                const modelGm = modelPeaks.length > 0
+                  ? Math.exp(modelPeaks.reduce((s, v) => s + Math.log(v), 0) / modelPeaks.length)
+                  : 0
+                return (
+                  <tr key={m.model} className="row-pass">
+                    <td className="rank-cell">{i + 1}</td>
+                    <td className="model-name">{m.label}</td>
+                    <td className="model-harness">{m.harness}</td>
+                    <td className="td-num">{m.pass_count}/{m.total_runs}</td>
+                    <td className="td-num">{(modelGm * 100).toFixed(2)}%</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="leaderboard-section">
         <h2 className="section-title">Problem Results</h2>
         <div className="leaderboard-table-wrap">
           <table className="leaderboard-table">
@@ -113,38 +152,42 @@ export default async function HomePage() {
                 <th>Problem</th>
                 <th>Precision</th>
                 <th>Regime</th>
-                <th>Status</th>
-                <th className="th-num">Peak Fraction</th>
+                {leaderboard.models.map((m) => (
+                  <th key={m.model} className="th-model">{m.label}</th>
+                ))}
                 <th>SOTA Ceiling</th>
-                <th>Kernel Approach</th>
-                <th>Solution</th>
               </tr>
             </thead>
             <tbody>
               {leaderboard.problems.map((prob) => {
                 const pp = leaderboard.per_problem[prob]
-                const cell = model?.results?.[prob]
                 const meta = PROBLEM_META[prob]
                 const isPass = pp?.n_passed > 0
                 const isPending = pp?.n_attempted > 0 && pp?.n_passed === 0
                 const status = isPass ? "PASS" : isPending ? "PENDING" : "—"
-                const frac = pp?.best_peak_fraction
-                const fracStr = frac != null ? `${(frac * 100).toFixed(2)}%` : "—"
-                const solType = cell?.has_solution
-                  ? cell?.correct === true ? "Triton / HIP" : "Written"
-                  : "—"
                 return (
                   <tr key={prob} className={isPass ? "row-pass" : isPending ? "row-pending" : "row-none"}>
                     <td className="prob-name"><a href={"/problems/" + prob}>{PROBLEM_LABELS[prob] ?? prob}</a></td>
                     <td className="prob-precision">{meta?.precision ?? "—"}</td>
                     <td className="prob-regime">{meta?.regime ?? "—"}</td>
-                    <td className="prob-status">
-                      <span className={`status-badge status-${isPass ? "pass" : isPending ? "pending" : "none"}`}>{status}</span>
-                    </td>
-                    <td className="td-num">{fracStr}</td>
+                    {leaderboard.models.map((m) => {
+                      const cell = m.results[prob]
+                      if (!cell || !cell.correct) {
+                        return <td key={m.model} className="td-num cell-empty">—</td>
+                      }
+                      const frac = cell.peak_fraction
+                      if (frac == null) {
+                        return <td key={m.model} className="td-num cell-pass-noperf">PASS</td>
+                      }
+                      const pctStr = (frac * 100).toFixed(2) + "%"
+                      const cellClass = frac >= 0.1 ? "cell-good" : frac >= 0.05 ? "cell-ok" : frac >= 0.01 ? "cell-low" : "cell-vlow"
+                      return (
+                        <td key={m.model} className={"td-num " + cellClass}>
+                          <a href={"/runs/mi325x/" + cell.run_id} className="cell-link">{pctStr}</a>
+                        </td>
+                      )
+                    })}
                     <td className="prob-sota">{meta?.sota ?? "—"}</td>
-                    <td className="prob-approach">{meta?.approach ?? "—"}</td>
-                    <td className="sol-type">{solType}</td>
                   </tr>
                 )
               })}
