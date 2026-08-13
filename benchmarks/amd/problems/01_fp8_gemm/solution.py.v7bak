@@ -1,0 +1,118 @@
+"""FP8 e4m3 GEMM -- raw HIP MFMA kernel for AMD MI325X (gfx942, CDNA 3).
+
+v7: Hybrid kernel — double-buffer BK=64 for square & small-M shapes, single-buffer BK=128
+for rectangular shapes. In-kernel sanitization, direct bf16 output.
+
+gfx942 uses FNUZ fp8 format (exponent bias 8 vs OCP bias 7), so each operand
+is interpreted as half its OCP value. The product is 1/4 of OCP -- compensated
+by a 4.0x scale factor applied to the accumulator in the kernel.
+
+Input sanitization (0x80 -> 0x00) and per-channel weight_scale application are
+done in the kernel. For split_k=1, the kernel writes bf16 directly. For
+split_k>1, the kernel uses atomicAdd into f32 and Python applies the scale.
+"""
+import os
+import ctypes
+import torch
+import torch.nn as nn
+
+os.environ.setdefault("PYTORCH_ROCM_ARCH", "gfx942")
+
+_LIB_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "libmfma_fp8_gemm.so"
+)
+
+_LIB_COMPAT = "/scratch/sonle5/benchmarks/amd/lib_compat"
+try:
+    ctypes.CDLL(
+        os.path.join(_LIB_COMPAT, "libamdhip64.so.7"),
+        mode=ctypes.RTLD_GLOBAL,
+    )
+except OSError:
+    pass
+
+_lib = ctypes.CDLL(_LIB_PATH)
+_lib.mfma_fp8_gemm.restype = ctypes.c_int
+_lib.mfma_fp8_gemm.argtypes = [
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+]
+
+_NUM_CU = 304
+_BM = 128
+_BN = 128
+
+
+def _compute_split_k(M: int, N: int, K: int) -> int:
+    if M <= 32:
+        bm, bn = 32, 256
+    else:
+        bm, bn = _BM, _BN
+    grid_m = (M + bm - 1) // bm
+    grid_n = (N + bn - 1) // bn
+    base_blocks = grid_m * grid_n
+    target = _NUM_CU * 2
+    if base_blocks >= target:
+        return 1
+    split_k = min((target + base_blocks - 1) // base_blocks, 16)
+    return max(1, split_k)
+
+
+class Model(nn.Module):
+    """y = ((x @ w.T) * weight_scale).to(bf16) via fp8 MFMA on gfx942."""
+
+    def __init__(self, M: int, N: int, K: int):
+        super().__init__()
+        self.M, self.N, self.K = M, N, K
+        E4M3_MAX = 448.0
+        w = torch.empty(N, K, dtype=torch.bfloat16)
+        nn.init.normal_(w, std=0.02)
+        s = (w.float().abs().amax(dim=1, keepdim=True) / E4M3_MAX).clamp(min=1e-12)
+        w_fp8 = (w.float() / s).to(torch.float8_e4m3fn)
+        self.register_buffer("weight", w_fp8)
+        self.register_buffer("weight_scale", s.squeeze(1).to(torch.float32))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        M = x.shape[0]
+        N = self.N
+        K = self.K
+
+        split_k = _compute_split_k(M, N, K)
+        stream = torch.cuda.current_stream().cuda_stream
+
+        if split_k == 1:
+            y = torch.empty(M, N, dtype=torch.bfloat16, device=x.device)
+            ret = _lib.mfma_fp8_gemm(
+                x.data_ptr(), self.weight.data_ptr(), y.data_ptr(),
+                M, N, K, split_k,
+                self.weight_scale.data_ptr(), stream,
+            )
+            if ret != 0:
+                raise RuntimeError(f"MFMA FP8 GEMM failed (ret={ret})")
+            return y
+        else:
+            out = torch.zeros(M, N, dtype=torch.float32, device=x.device)
+            ret = _lib.mfma_fp8_gemm(
+                x.data_ptr(), self.weight.data_ptr(), out.data_ptr(),
+                M, N, K, split_k,
+                ctypes.c_void_p(0), stream,
+            )
+            if ret != 0:
+                raise RuntimeError(f"MFMA FP8 GEMM failed (ret={ret})")
+            y = (out * self.weight_scale[None, :]).to(torch.bfloat16)
+            return y
+
+
+M = 4096
+N = 4096
+K = 4096
+
+
+def get_inputs():
+    x = (torch.rand(M, K) * 8 - 4).to(torch.float8_e4m3fn)
+    return [x]
+
+
+def get_init_inputs():
+    return [M, N, K]
