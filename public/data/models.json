@@ -89,9 +89,9 @@
           "run_id": "manual_01_glm52_fused_moe",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": null,
-          "failure_reason": "correctness verified via memory-efficient check; benchmark pending (needs ~26GB for two models)",
-          "retryable_infra_failure": true
+          "peak_fraction": 0.0044,
+          "failure_reason": null,
+          "retryable_infra_failure": false
         },
         "02_deepseek_nsa": {
           "run_id": "manual_02_deepseek_nsa",
@@ -224,9 +224,14 @@
     "01_glm52_fused_moe": {
       "n_attempted": 1,
       "n_passed": 1,
-      "best_peak_fraction": null,
+      "best_peak_fraction": 0.0044,
       "best_model": "manual",
-      "ranked_passes": []
+      "ranked_passes": [
+        {
+          "model": "manual",
+          "peak_fraction": 0.0044
+        }
+      ]
     },
     "02_deepseek_nsa": {
       "n_attempted": 1,
