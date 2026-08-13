@@ -1,0 +1,37 @@
+name: 05_topk_bitonic
+display_name: "TopK via Bitonic Sort"
+precision: fp32
+regime: memory
+
+flops_formula: "batch * n * 4"
+bytes_formula: "batch * n * 4 + batch * k * (4 + 8)"
+
+hardware: [MI325X]
+peak_tflops_key: fp32
+peak_bandwidth_key: dram
+
+tolerance:
+  float32: 1.0e-4
+
+forbidden:
+  - "torch.topk"
+  - "torch.kthvalue"
+  - "torch.sort"
+  - "torch.argsort"
+  - "Tensor.topk"
+  - "Tensor.kthvalue"
+  - "Tensor.sort"
+  - "Tensor.argsort"
+  - "torch.ops.aten.topk"
+  - "torch.ops.aten.sort"
+  - "torch.ops.aten.kthvalue"
+
+sota:
+  name: "torch.topk (ROCm / hipCUB internals)"
+  url: "https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/native/cuda/TensorTopK.cu"
+  function: "torch.topk"
+  deps: []
+  reference_throughput_gbps_mi325x: 4000
+
+num_correct_trials: 3
+num_perf_trials: 50
