@@ -1,0 +1,31 @@
+name: 07_w4a16_gemm
+display_name: "W4A16 Weight-only Quantized GEMM"
+precision: int4_bf16
+regime: memory
+
+flops_formula: "2 * M * N * K"
+bytes_formula: "M * K * 2 + N * K // 2 + N * K // 128 * 2 + M * N * 2"
+
+hardware: [MI325X]
+peak_tflops_key: int4
+peak_bandwidth_key: dram
+
+tolerance:
+  bfloat16: 0.02
+
+forbidden:
+  - "bitsandbytes.functional.dequantize_4bit"
+  - "bitsandbytes.functional.gemv_4bit"
+  - "marlin_kernel.gemm"
+  - "torch.nn.functional.linear"
+
+sota:
+  name: "bitsandbytes NF4 (gemv_4bit / dequantize_4bit + matmul) — ROCm build"
+  url: "https://github.com/TimDettmers/bitsandbytes"
+  function: "bitsandbytes.functional.gemv_4bit"
+  deps:
+    - "bitsandbytes (ROCm build)"
+  reference_throughput_gbps_mi325x: 6000
+
+num_correct_trials: 3
+num_perf_trials: 50

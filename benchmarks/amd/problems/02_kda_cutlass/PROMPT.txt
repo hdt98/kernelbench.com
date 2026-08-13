@@ -1,0 +1,7 @@
+I need you to optimize a Kimi Delta Attention (KDA) chunk forward kernel for the AMD Instinct MI325X (gfx942, CDNA 3, 288 GB HBM3E at 8.0 TB/s, 1614.4 TFLOPS BF16 peak). The reference implementation is in reference.py and your kernel goes in solution.py. You can make whatever mess you want in this directory, but the final answer has to be in solution.py with the same Model, get_inputs, and get_init_inputs interface as reference.py.
+
+KDA is a gated delta attention mechanism that processes sequences in chunks. The forward pass involves: chunk-wise QKV projection, intra-chunk attention with delta gating, and inter-chunk recurrent state propagation. All computation is in BF16 with FP32 accumulation. Correctness tolerance is 0.02 atol/rtol on BF16 outputs.
+
+This needs to be a real custom kernel — HIP C++ via torch.utils.cpp_extension.load_inline, Triton on ROCm, or Composable Kernel. Don't reach for fla.ops.kda, chunk_kda, fused_recurrent_kda, or naive_chunk_kda; they're off-limits. Anything you're uncertain about, look up ROCm docs and investigate.
+
+Your flywheel is implement, profile (rocprof, omniperf), time with benchmark.py, verify with python check.py. If check.py hasn't printed PASS, you're not done. Take as long as you need to actually push the number up.

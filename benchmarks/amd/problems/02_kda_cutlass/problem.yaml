@@ -1,0 +1,32 @@
+name: 02_kda_cutlass
+display_name: "Kimi Delta Attention (chunk forward) via CUTLASS CuTe"
+precision: bf16
+regime: compute
+
+flops_formula: "2 * batch * num_heads * seq_len * head_dim * 2"
+bytes_formula: "batch * num_heads * seq_len * head_dim * 2 * 3"
+
+hardware: [MI325X]
+peak_tflops_key: bf16
+peak_bandwidth_key: dram
+
+tolerance:
+  bfloat16: 0.02
+
+forbidden:
+  - "fla.ops.kda"
+  - "fla.ops.chunk_kda"
+  - "chunk_kda"
+  - "fused_recurrent_kda"
+  - "naive_chunk_kda"
+
+sota:
+  name: "FLA chunk_kda (Triton on ROCm)"
+  url: "https://github.com/fla-org/flash-linear-attention/tree/main/fla/ops/kda"
+  function: "fla.ops.kda.chunk_kda"
+  deps:
+    - "flash-linear-attention"
+  reference_throughput_tflops_mi325x: 500
+
+num_correct_trials: 3
+num_perf_trials: 50
