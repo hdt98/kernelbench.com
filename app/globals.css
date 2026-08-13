@@ -4731,3 +4731,18 @@ pre[class*="language-"] {
 .status-pending { background: #fbbf2422; color: var(--color-warn); }
 .status-none { background: var(--color-surface-muted); color: var(--color-fg-dim); }
 
+
+/* Problem descriptions */
+.problem-descriptions { display: grid; gap: 12px; }
+.problem-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; padding: 16px; }
+.problem-card-pass { border-color: var(--color-accent-dim); }
+.problem-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.problem-card-name { font-weight: 600; color: var(--color-fg-bright); }
+.problem-card-tags { display: flex; gap: 8px; }
+.tag { font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; background: var(--color-surface-muted); color: var(--color-fg-muted); }
+.tag-precision { color: var(--color-accent); }
+.problem-card-desc { color: var(--color-fg-muted); font-size: 0.875rem; line-height: 1.5; margin: 0; }
+
+/* Table additions */
+.prob-precision, .prob-regime { font-size: 0.8rem; color: var(--color-fg-muted); }
+.leaderboard-table th { font-size: 0.8rem; }

@@ -59,6 +59,8 @@ def check_rocm_language(
     meta = meta or {}
     if "require_kernel_evidence" in meta:
         require_kernel_evidence = bool(meta["require_kernel_evidence"])
+    elif "require_cuda_evidence" in meta:
+        require_kernel_evidence = bool(meta["require_cuda_evidence"])
 
     dsl_hits = _scan(sol_src, DSL_PATTERNS)
     kernel_hits = _scan(sol_src, KERNEL_EVIDENCE_PATTERNS)

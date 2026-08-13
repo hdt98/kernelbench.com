@@ -60,7 +60,7 @@ export function SiteNav() {
         </nav>
         <div className="nav-icons">
           <a
-            href="https://github.com/Infatoshi/kernelbench.com"
+            href="https://github.com/hdt98/kernelbench.com"
             target="_blank"
             rel="noreferrer"
             aria-label="GitHub repository"
