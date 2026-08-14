@@ -1,0 +1,189 @@
+"""Segmented exponential-decay scan for MI325X -- 3-kernel chunked scan.
+
+Qwen 3.8 (Nexus-hosted) in-session solution for
+KernelBench-AMD 02_segmented_decay_scan.
+
+h_t = x_t if resets[t] else decay_t * h_{t-1} + x_t   (h_{-1} = 0)
+
+Folding the reset into the per-step multiplier a_t = where(reset, 0, decay_t)
+makes the recurrence an associative (A, B) scan. Three kernels in one graph:
+
+  A (grid B x D-tiles x chunks): local fp32 scan inside each C=64-step chunk
+     starting from zero, streaming per-timestep rows; writes the bf16 local
+     trajectory plus the chunk summary (A_c = prod a_t over the chunk,
+     B_c = local h at chunk end -- exactly the state the chunk maps 0 to).
+     Ragged tails (t >= T) load a_t = 1, x_t = 0, i.e. identity steps, so the
+     summary and trajectory stay correct without special casing. Channel tiles
+     are padded to the next power of two and masked, so any D works.
+  B (grid B x D-tiles): sequential fp32 scan over chunk summaries along T
+     (<= 256 vector steps), emitting the prefix state each chunk starts from:
+     S_{c+1} = (A_c * S_c.A, A_c * S_c.B + B_c).
+  C (grid B x D-tiles x chunks): out = pre_A * h_local + pre_B, cast to bf16.
+     Exact by linearity; the only extra rounding vs the reference is the bf16
+     round-trip of h_local, well inside the 5e-2 bf16 tolerance.
+
+  A (grid B x D-tiles x chunks): local fp32 scan inside each C=64-step chunk
+     starting from zero, streaming per-timestep rows; writes only the chunk
+     summary (A_c = prod a_t over the chunk, B_c = local h at chunk end --
+     exactly the state the chunk maps 0 to). Ragged tails (t >= T) load
+     a_t = 1, x_t = 0, i.e. identity steps, so the summary stays correct
+     without special casing. Channel tiles are padded to the next power of two
+     and masked, so any D works.
+  B (grid B x D-tiles): sequential fp32 scan over chunk summaries along T
+     (<= 256 vector steps): state S=0; per chunk, store S as the chunk's start
+     state, then S <- A_c * S + B_c.
+  C (grid B x D-tiles x chunks): reruns the recurrence in fp32 starting from
+     the chunk's start state and writes the bf16 output. Same elementwise op
+     sequence as the reference, so rounding matches step for step.
+
+Traffic: x (2B) + decay (4B) + local trajectory write/read (2B + 2B) + out
+(2B) per element, ~1.5x the streaming minimum.
+Traffic: x (2B) + decay (4B) + resets read twice (A and C) + out (2B) per
+element, ~1.3x the streaming minimum.
+"""
+import torch
+import torch.nn as nn
+import triton
+import triton.language as tl
+
+C = 64  # chunk length in timesteps
+
+
+@triton.jit
+def _scan_local(x_ptr, d_ptr, r_ptr, pa_ptr, pb_ptr,
+                T, D, nchunks, tiles, BD: tl.constexpr, CC: tl.constexpr):
+    pid = tl.program_id(0)
+    bd = pid // nchunks
+    c = pid % nchunks
+    b = bd // tiles
+    dtile = bd % tiles
+    rd = dtile * BD + tl.arange(0, BD)
+    dmask = rd < D
+    t0 = c * CC
+
+    h = tl.zeros((BD,), dtype=tl.float32)
+    a_prod = tl.full((BD,), 1.0, dtype=tl.float32)
+    # static_range: ROCm Triton 3.1 segfaults in make_ttgir on a runtime loop
+    # that both carries a vector and stores it each iteration.
+    for t in tl.static_range(CC):
+        tt = t0 + t
+        live = tt < T
+        xm = live & dmask
+        xt = tl.load(x_ptr + (b * T + tt) * D + rd, mask=xm, other=0.0).to(tl.float32)
+        dt_ = tl.load(d_ptr + (b * T + tt) * D + rd, mask=xm, other=1.0)
+        rt_ = tl.load(r_ptr + b * T + tt, mask=live, other=0)
+        a_t = tl.where(rt_, 0.0, dt_)
+        h = a_t * h + xt
+        a_prod = a_prod * a_t
+
+    tl.store(pa_ptr + (bd * nchunks + c) * BD + tl.arange(0, BD), a_prod, mask=dmask)
+    tl.store(pb_ptr + (bd * nchunks + c) * BD + tl.arange(0, BD), h, mask=dmask)
+
+
+@triton.jit
+def _scan_prefix(pa_ptr, pb_ptr, st_ptr, D, NC: tl.constexpr, BD: tl.constexpr):
+    bd = tl.program_id(0)
+    rd = tl.arange(0, BD)
+    dmask = rd < D
+    s = tl.zeros((BD,), dtype=tl.float32)
+    for c in tl.static_range(NC):
+        tl.store(st_ptr + (bd * NC + c) * BD + rd, s, mask=dmask)
+        a_c = tl.load(pa_ptr + (bd * NC + c) * BD + rd, mask=dmask, other=1.0)
+        b_c = tl.load(pb_ptr + (bd * NC + c) * BD + rd, mask=dmask, other=0.0)
+        s = a_c * s + b_c
+
+
+@triton.jit
+def _scan_fixup(x_ptr, d_ptr, r_ptr, st_ptr, o_ptr, T, D, nchunks, tiles,
+                BD: tl.constexpr, CC: tl.constexpr):
+    pid = tl.program_id(0)
+    bd = pid // nchunks
+    c = pid % nchunks
+    b = bd // tiles
+    dtile = bd % tiles
+    rd = dtile * BD + tl.arange(0, BD)
+    dmask = rd < D
+    t0 = c * CC
+    h = tl.load(st_ptr + (bd * nchunks + c) * BD + rd, mask=dmask, other=0.0)
+    for t in tl.static_range(CC):
+        tt = t0 + t
+        live = tt < T
+        xm = live & dmask
+        xt = tl.load(x_ptr + (b * T + tt) * D + rd, mask=xm, other=0.0).to(tl.float32)
+        dt_ = tl.load(d_ptr + (b * T + tt) * D + rd, mask=xm, other=1.0)
+        rt_ = tl.load(r_ptr + b * T + tt, mask=live, other=0)
+        a_t = tl.where(rt_, 0.0, dt_)
+        h = a_t * h + xt
+        tl.store(o_ptr + (b * T + tt) * D + rd, h.to(tl.bfloat16), mask=xm)
+
+
+def _next_pow2(x: int) -> int:
+    return max(16, 1 << (x - 1).bit_length())
+
+
+class Model(nn.Module):
+    def __init__(self, B: int, T: int, D: int):
+        super().__init__()
+        self.B, self.T, self.D = B, T, D
+        self.register_buffer("_dummy", torch.zeros(1, dtype=torch.bfloat16))
+        self._graph = None
+        self._graph_key = None
+        self._graph_out = None
+
+    def _compute(self, x, decay, resets):
+        B, T, D = self.B, self.T, self.D
+        dev = x.device
+        nc = (T + C - 1) // C
+        bd = _next_pow2(D)
+        tiles = (D + bd - 1) // bd
+        nbd = B * tiles
+        warps = max(1, min(4, bd // 32))
+        pa = torch.empty(nbd * nc * bd, dtype=torch.float32, device=dev)
+        pb = torch.empty(nbd * nc * bd, dtype=torch.float32, device=dev)
+        st = torch.empty(nbd * nc * bd, dtype=torch.float32, device=dev)
+        _scan_local[(nbd * nc,)](x, decay, resets, pa, pb, T, D, nc, tiles,
+                                 BD=bd, CC=C, num_warps=warps)
+        _scan_prefix[(nbd,)](pa, pb, st, D, NC=nc, BD=bd, num_warps=warps)
+        out = torch.empty(B, T, D, dtype=torch.bfloat16, device=dev)
+        _scan_fixup[(nbd * nc,)](x, decay, resets, st, out, T, D, nc, tiles,
+                                 BD=bd, CC=C, num_warps=warps)
+        return out
+
+    def forward(self, x, decay, resets):
+        key = (x.data_ptr(), decay.data_ptr(), resets.data_ptr(), tuple(x.shape))
+        if self._graph is not None and self._graph_key == key:
+            self._graph.replay()
+            return self._graph_out
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for _ in range(2):
+                out = self._compute(x, decay, resets)
+        torch.cuda.current_stream().wait_stream(s)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            out = self._compute(x, decay, resets)
+        self._graph = g
+        self._graph_key = key
+        self._graph_out = out
+        g.replay()
+        return out
+
+
+# Same default shape and input distribution as the reference deck entry
+# (standalone: this problem forbids importing the reference module).
+B = 8
+T = 4096
+D = 2048
+RESET_PROB = 1.0 / 64.0
+
+
+def get_inputs():
+    x = torch.randn(B, T, D, dtype=torch.bfloat16)
+    decay = torch.rand(B, T, D, dtype=torch.float32) * 0.945 + 0.05
+    resets = torch.rand(B, T) < RESET_PROB
+    return [x, decay, resets]
+
+
+def get_init_inputs():
+    return [B, T, D]

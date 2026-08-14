@@ -1,0 +1,10 @@
+run_id: qwen38_mi350x_02_deepseek_nsa
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 02_deepseek_nsa
+peak_fraction: 0.0036
+
+verdict: clean
+
+summary: "Vectorized PyTorch re-derivation, no custom kernel (this problem's language gate does not require kernel evidence) -- block importance via key prefix means instead of an S x S score matrix, topk->scatter selection, causal sliding-window band union, dense bf16 masked attention with fp32 softmax, CUDA-graphed forward on input pointers. No cheat patterns; disclosed as torch-only (framework=unknown at the gate). MI350X board: same-session solution as the audited MI325X cell (md5-identical; see deck audit) -- run on a shared MI350X SR-IOV virtual function (gfx950, ROCm 7.0.2, torch 2.10.0+rocm7.0, triton 3.7.1); graded against the repo's estimated MI350X peaks, consistent with the published GLM MI350X row."

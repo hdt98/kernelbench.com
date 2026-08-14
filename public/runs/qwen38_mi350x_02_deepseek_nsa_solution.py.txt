@@ -1,0 +1,131 @@
+"""DeepSeek NSA-style block-select sparse attention for MI325X.
+
+Qwen 3.8 (Nexus-hosted) in-session solution for KernelBench-AMD 02_deepseek_nsa.
+
+Same semantics as the reference oracle, fully vectorized over (B, H, S):
+
+  1. Block importance without an S x S score matrix: the mean score of query
+     t over block bi is q_t . (mean of k_j over j in block bi, j <= t) scaled,
+     so a key prefix-sum (cumsum along the sequence axis) plus two gathers per
+     block yields every (t, bi) importance in fp32. Future blocks get -1e9,
+     matching the reference's sentinel.
+  2. Selection: top_n blocks per query via topk, scattered into a
+     (B, H, S, n_blocks) bool tensor, then expanded to key space with one
+     gather by block-of-key; unioned with the causal sliding window band.
+     (The reference's (-1e9) future blocks are no-ops when selected, so
+     topk tie-breaking among them cannot change the selected key set.)
+  3. Attention: dense bf16 q @ k^T (fp32 accumulate) upcast to fp32, masked
+     fill -inf outside the selection, fp32 softmax, then bf16 att @ v.
+     The final output rounds to bf16 like the reference.
+
+No SDPA / flash attention anywhere; plain matmuls and masks. Forward is
+CUDA-graph-cached on the input pointers.
+"""
+from __future__ import annotations
+
+import math
+
+import torch
+import torch.nn as nn
+
+BLOCK_SIZE = 64
+TOP_N_BLOCKS = 8
+SLIDING_WINDOW = 64
+
+
+def _nsa_attend(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    B, H, S, D = q.shape
+    dev = q.device
+    scale = 1.0 / math.sqrt(D)
+    bs = BLOCK_SIZE
+    n_blocks = (S + bs - 1) // bs
+
+    qf = q.float()
+    kf = k.float()
+
+    # --- 1. block importance via key prefix means (fp32, no S x S matmul) ---
+    kp = kf.cumsum(dim=2)                                   # (B,H,S,D)
+    t_idx = torch.arange(S, device=dev)
+    imp = torch.empty(B, H, S, n_blocks, dtype=torch.float32, device=dev)
+    for bi in range(n_blocks):
+        s0 = bi * bs
+        s_end = min(s0 + bs - 1, S - 1)
+        e = torch.clamp(t_idx, max=s_end)                   # gather index per t
+        p_end = kp[:, :, e]                                 # (B,H,S,D)
+        if s0 > 0:
+            p_start = kp[:, :, s0 - 1].unsqueeze(2)         # (B,H,1,D)
+        else:
+            p_start = 0.0
+        # Partial final block: keys-in-block caps at s_end - s0 + 1 = S - s0.
+        count = torch.clamp(t_idx + 1 - s0, min=0,
+                            max=s_end - s0 + 1).to(torch.float32)
+        mean_k = (p_end - p_start) / count.clamp(min=1.0)[None, None, :, None]
+        imp_b = scale * torch.einsum("bhsd,bhsd->bhs", qf, mean_k)
+        imp[..., bi] = torch.where(t_idx[None, None, :] >= s0, imp_b,
+                                   torch.full_like(imp_b, -1e9))
+
+    # --- 2. selection mask (B,H,S,S) bool ---
+    # topk k cannot exceed n_blocks (short contexts); the reference's
+    # block_imp[:top_n] slice behaves the same way.
+    topn = min(TOP_N_BLOCKS, n_blocks)
+    topi = imp.topk(topn, dim=-1).indices                   # (B,H,S,topn)
+    block_sel = torch.zeros(B, H, S, n_blocks, dtype=torch.bool, device=dev)
+    block_sel.scatter_(-1, topi, True)
+    block_of_j = torch.arange(S, device=dev) // bs          # (S,)
+    sel = block_sel.index_select(-1, block_of_j)            # (B,H,S,S)
+
+    causal = t_idx[None, :] <= t_idx[:, None]               # (S,S) j <= t
+    w_lo = (t_idx + 1 - SLIDING_WINDOW).clamp(min=0)
+    band = (t_idx[None, :] >= w_lo[:, None]) & causal       # sliding window
+    sel = (sel & causal) | band
+
+    # --- 3. masked attention (dense scores, bf16 GEMMs, fp32 softmax) ---
+    scores = torch.matmul(q, k.transpose(-1, -2)).float() * scale
+    scores = scores.masked_fill(~sel, float("-inf"))
+    att = torch.softmax(scores, dim=-1)
+    o = torch.matmul(att.to(torch.bfloat16), v)
+    return o
+
+
+class Model(nn.Module):
+    def __init__(self, B: int, H: int, S: int, D: int):  # noqa: E741
+        super().__init__()
+        self.B, self.H, self.S, self.D = B, H, S, D
+        self.register_buffer("_dummy", torch.zeros(1, dtype=torch.bfloat16))
+        self._graph = None
+        self._graph_key = None
+        self._graph_out = None
+
+    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        key = (q.data_ptr(), k.data_ptr(), v.data_ptr(), tuple(q.shape))
+        if self._graph is not None and self._graph_key == key:
+            self._graph.replay()
+            return self._graph_out
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for _ in range(2):
+                out = _nsa_attend(q, k, v)
+        torch.cuda.current_stream().wait_stream(s)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            out = _nsa_attend(q, k, v)
+        self._graph = g
+        self._graph_key = key
+        self._graph_out = out
+        g.replay()
+        return out
+
+
+B, H, S, D = 1, 16, 1024, 64
+
+
+def get_init_inputs():
+    return [B, H, S, D]
+
+
+def get_inputs():
+    q = torch.randn(B, H, S, D, dtype=torch.bfloat16)
+    k = torch.randn(B, H, S, D, dtype=torch.bfloat16)
+    v = torch.randn(B, H, S, D, dtype=torch.bfloat16)
+    return [q, k, v]

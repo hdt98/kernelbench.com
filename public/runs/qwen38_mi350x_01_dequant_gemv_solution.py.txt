@@ -1,0 +1,173 @@
+"""Gated W4A16 dequant-GEMV (group 96, ragged) for MI325X.
+
+Qwen 3.8 (Nexus-hosted) in-session solution for KernelBench-AMD 01_dequant_gemv.
+
+out = silu(x @ Wg) * (x @ Wu), both weights asymmetric int4 with GROUP SIZE 96
+along K and a ragged last group when K % 96 != 0. w_q is (K//2, N) uint8, low
+nibble = even-K row; scales/zeros are (ceil(K/96), N) bf16.
+
+One kernel, grid over N tiles. Each program walks the K-groups in order; per
+group it streams the 48 packed bytes of both matrices for its columns,
+unpacks each into a (96, BN) bf16 tile (row 2i = low nibble, 2i+1 = high),
+applies (w - z_g) * s_g, and accumulates tl.dot(x_chunk, w_deq) in fp32 for
+gate and up simultaneously. Rows past K are masked (x zeroed, packed-byte rows
+past K//2 masked off), which makes the ragged final group fall out naturally.
+The silu(gate)*up epilogue runs in fp32 before the bf16 store. M <= 4 pads
+the activation tile to 16 rows for tl.dot. Forward is CUDA-graph-cached on
+the input pointer.
+
+Lanes are padded to 128 per group (GPC) because tl.arange requires powers of
+two while the group size is 96; lanes 96..127 are masked off on the x load,
+the packed-byte load, and the dequantized weight before tl.dot.
+"""
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import triton
+import triton.language as tl
+
+GROUP = 96
+GPC = 128  # pow2 lane padding for GROUP (tl.arange requires powers of two)
+BN = 128
+
+
+@triton.jit
+def _gated_gemv_kernel(
+    x_ptr, wqg_ptr, wqu_ptr, sg_ptr, su_ptr, zg_ptr, zu_ptr, y_ptr,
+    M, N, K, ngroups,
+    BMC: tl.constexpr, BNC: tl.constexpr, GPC: tl.constexpr,
+    GSIZE: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    rn = pid * BNC + tl.arange(0, BNC)
+    nmask = rn < N
+    rm = tl.arange(0, BMC)
+    mmask = rm < M
+    rk = tl.arange(0, GPC)
+    rkb = tl.arange(0, GPC // 2)
+
+    accg = tl.zeros((BMC, BNC), dtype=tl.float32)
+    accu = tl.zeros((BMC, BNC), dtype=tl.float32)
+    khalf = K // 2
+    for g in range(ngroups):
+        k0 = g * GSIZE
+        glane = (rk < GSIZE) & ((k0 + rk) < K)
+        brow = k0 // 2 + rkb
+        bmask = (nmask[None, :] & (rkb < GSIZE // 2)[:, None]
+                 & (brow < khalf)[:, None])
+        xg = tl.load(x_ptr + rm[:, None] * K + k0 + rk[None, :],
+                     mask=mmask[:, None] & glane[None, :], other=0.0)
+        sg = tl.load(sg_ptr + g * N + rn, mask=nmask, other=0.0).to(tl.float32)
+        zg = tl.load(zg_ptr + g * N + rn, mask=nmask, other=0.0).to(tl.float32)
+        su = tl.load(su_ptr + g * N + rn, mask=nmask, other=0.0).to(tl.float32)
+        zu = tl.load(zu_ptr + g * N + rn, mask=nmask, other=0.0).to(tl.float32)
+
+        xbg = tl.load(wqg_ptr + brow[:, None] * N + rn[None, :], mask=bmask, other=0)
+        log_ = (xbg & 0xF).to(tl.bfloat16)
+        hig_ = ((xbg >> 4) & 0xF).to(tl.bfloat16)
+        wg = tl.reshape(tl.trans(tl.join(log_, hig_), 0, 2, 1), (GPC, BNC))
+        wgd = (wg.to(tl.float32) - zg[None, :]) * sg[None, :]
+        wgd = tl.where(glane[:, None], wgd, 0.0)
+        accg = tl.dot(xg, wgd.to(tl.bfloat16), accg)
+
+        xbu = tl.load(wqu_ptr + brow[:, None] * N + rn[None, :], mask=bmask, other=0)
+        lou = (xbu & 0xF).to(tl.bfloat16)
+        hiu = ((xbu >> 4) & 0xF).to(tl.bfloat16)
+        wu = tl.reshape(tl.trans(tl.join(lou, hiu), 0, 2, 1), (GPC, BNC))
+        wud = (wu.to(tl.float32) - zu[None, :]) * su[None, :]
+        wud = tl.where(glane[:, None], wud, 0.0)
+        accu = tl.dot(xg, wud.to(tl.bfloat16), accu)
+
+    gate = accg
+    up = accu
+    out = (gate * tl.sigmoid(gate)) * up
+    y = out.to(tl.bfloat16)
+    tl.store(y_ptr + rm[:, None] * N + rn[None, :], y, mask=mmask[:, None] & nmask[None, :])
+
+
+def _quantize(w_full: torch.Tensor, group_size: int):
+    K, N = w_full.shape
+    n_groups = (K + group_size - 1) // group_size
+    K_pad = n_groups * group_size
+    if K_pad > K:
+        w_padded = torch.zeros(K_pad, N, dtype=w_full.dtype)
+        w_padded[:K] = w_full
+    else:
+        w_padded = w_full
+    w_grouped = w_padded.view(n_groups, group_size, N)
+    mn = w_grouped.min(dim=1).values
+    mx = w_grouped.max(dim=1).values
+    sc = (mx - mn).clamp_min(1e-8) / 15.0
+    zp = (-mn / sc).round().clamp(0, 15)
+    w_q_grouped = ((w_grouped / sc.unsqueeze(1)) + zp.unsqueeze(1)).round().clamp(0, 15).to(torch.uint8)
+    w_q = w_q_grouped.view(K_pad, N)[:K].contiguous()
+    return w_q, sc.to(torch.bfloat16), zp.to(torch.bfloat16)
+
+
+class Model(nn.Module):
+    def __init__(self, M: int, N: int, K: int, group_size: int = GROUP):
+        super().__init__()
+        assert K % 2 == 0
+        self.M, self.N, self.K = M, N, K
+        self.group_size = group_size
+        torch.manual_seed(0x9C ^ (M * 1315423911 + N * 2654435761 + K))
+        for name in ("gate", "up"):
+            w_full = torch.randn(K, N, dtype=torch.float32) * 0.02
+            w_q, scales, zeros = _quantize(w_full, group_size)
+            lo = w_q[0::2].to(torch.uint8) & 0xF
+            hi = w_q[1::2].to(torch.uint8) & 0xF
+            self.register_buffer(f"w_q_{name}", (lo | (hi << 4)).contiguous())
+            self.register_buffer(f"scales_{name}", scales)
+            self.register_buffer(f"zeros_{name}", zeros)
+        self._graph = None
+        self._graph_key = None
+        self._graph_out = None
+
+    def _compute(self, x):
+        M, N, K = self.M, self.N, self.K
+        ngroups = (K + GROUP - 1) // GROUP
+        bm = max(16, 1 << (M - 1).bit_length())
+        y = torch.empty(M, N, dtype=torch.bfloat16, device=x.device)
+        grid = ((N + BN - 1) // BN,)
+        _gated_gemv_kernel[grid](
+            x, self.w_q_gate, self.w_q_up,
+            self.scales_gate, self.scales_up, self.zeros_gate, self.zeros_up,
+            y, M, N, K, ngroups, BMC=bm, BNC=BN, GPC=GPC, GSIZE=GROUP,
+            num_warps=8)
+        return y
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        key = (x.data_ptr(), tuple(x.shape))
+        if self._graph is not None and self._graph_key == key:
+            self._graph.replay()
+            return self._graph_out
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for _ in range(2):
+                out = self._compute(x)
+        torch.cuda.current_stream().wait_stream(s)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            out = self._compute(x)
+        self._graph = g
+        self._graph_key = key
+        self._graph_out = out
+        g.replay()
+        return out
+
+
+# Same default shape and input distribution as the reference deck entry
+# (standalone: this problem forbids importing the reference module).
+M = 1
+N = 11008
+K = 4096
+
+
+def get_inputs():
+    x = torch.randn(M, K, dtype=torch.bfloat16)
+    return [x]
+
+
+def get_init_inputs():
+    return [M, N, K]
