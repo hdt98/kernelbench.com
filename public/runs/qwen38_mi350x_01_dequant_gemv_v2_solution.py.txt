@@ -1,0 +1,210 @@
+"""Gated W4A16 dequant-GEMV (group 96, ragged) -- split-K decode path.
+
+Qwen 3.8 (Nexus-hosted) in-session solution for KernelBench-AMD 01_dequant_gemv.
+
+out = silu(x @ Wg) * (x @ Wu), both weights asymmetric int4 with GROUP SIZE 96
+along K and a ragged last group when K % 96 != 0. w_q is (K//2, N) uint8, low
+nibble = even-K row; scales/zeros are (ceil(K/96), N) bf16.
+
+v1 walked the whole K axis in ONE program per N tile -- only ~36-108 programs
+on the GPU while the decode shapes are bandwidth-bound on the two int4 weight
+streams, so the kernels were latency-bound far below DRAM peak. v2 splits K:
+the ceil(K/96) groups are partitioned into SPLITK slices (autotuned 4-32);
+grid = (N/BN) x SPLITK; each program streams its slice of BOTH weights,
+unpacks/dequants with the exact v1 body (96-group lanes padded to 128, ragged
+final group masked off naturally), and writes fp32 gate/up partials. A reduce
+kernel sums the SPLITK partials and applies the silu(gate)*up epilogue in
+fp32 before the bf16 store. M <= 4 pads the activation tile to 16 rows for
+tl.dot. Forward is CUDA-graph-cached on the input pointer.
+"""
+import torch
+import torch.nn as nn
+import triton
+import triton.language as tl
+
+GROUP = 96
+GPC = tl.constexpr(128)   # pow2 lane padding for GROUP (tl.arange wants pow2)
+GSIZE = tl.constexpr(96)
+
+
+def _cfgs():
+    cs = []
+    for bn in (64, 128):
+        for sk in (4, 8, 16, 32):
+            for w in (4, 8):
+                cs.append(triton.Config({"BNC": bn, "SPLITK": sk},
+                                        num_warps=w, num_stages=1))
+    cs.append(triton.Config({"BNC": 128, "SPLITK": 16}, num_warps=8, num_stages=2))
+    cs.append(triton.Config({"BNC": 64, "SPLITK": 32}, num_warps=4, num_stages=2))
+    return cs
+
+
+@triton.autotune(configs=_cfgs(), key=["M", "N", "K"])
+@triton.jit
+def _gated_gemv_splitk(
+    x_ptr, wqg_ptr, wqu_ptr, sg_ptr, su_ptr, zg_ptr, zu_ptr,
+    wsg_ptr, wsu_ptr,
+    M, N, K, ngroups,
+    BMC: tl.constexpr, BNC: tl.constexpr, SPLITK: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    grid_n = tl.cdiv(N, BNC)
+    sk = pid // grid_n
+    pid_n = pid % grid_n
+    rn = pid_n * BNC + tl.arange(0, BNC)
+    nmask = rn < N
+    rm = tl.arange(0, BMC)
+    mmask = rm < M
+    rk = tl.arange(0, GPC)
+    rkb = tl.arange(0, GPC // 2)
+
+    ng_per = tl.cdiv(ngroups, SPLITK)
+    g0 = sk * ng_per
+    gend = tl.minimum(g0 + ng_per, ngroups)
+
+    accg = tl.zeros((BMC, BNC), dtype=tl.float32)
+    accu = tl.zeros((BMC, BNC), dtype=tl.float32)
+    khalf = K // 2
+    for g in range(g0, gend):
+        k0 = g * GSIZE
+        glane = (rk < GSIZE) & ((k0 + rk) < K)
+        brow = k0 // 2 + rkb
+        bmask = (nmask[None, :] & (rkb < GSIZE // 2)[:, None]
+                 & (brow < khalf)[:, None])
+        xg = tl.load(x_ptr + rm[:, None] * K + k0 + rk[None, :],
+                     mask=mmask[:, None] & glane[None, :], other=0.0)
+        sg = tl.load(sg_ptr + g * N + rn, mask=nmask, other=0.0).to(tl.float32)
+        zg = tl.load(zg_ptr + g * N + rn, mask=nmask, other=0.0).to(tl.float32)
+        su = tl.load(su_ptr + g * N + rn, mask=nmask, other=0.0).to(tl.float32)
+        zu = tl.load(zu_ptr + g * N + rn, mask=nmask, other=0.0).to(tl.float32)
+
+        xbg = tl.load(wqg_ptr + brow[:, None] * N + rn[None, :], mask=bmask, other=0)
+        log_ = (xbg & 0xF).to(tl.bfloat16)
+        hig_ = ((xbg >> 4) & 0xF).to(tl.bfloat16)
+        wg = tl.reshape(tl.trans(tl.join(log_, hig_), 0, 2, 1), (GPC, BNC))
+        wgd = (wg.to(tl.float32) - zg[None, :]) * sg[None, :]
+        wgd = tl.where(glane[:, None], wgd, 0.0)
+        accg = tl.dot(xg, wgd.to(tl.bfloat16), accg)
+
+        xbu = tl.load(wqu_ptr + brow[:, None] * N + rn[None, :], mask=bmask, other=0)
+        lou = (xbu & 0xF).to(tl.bfloat16)
+        hiu = ((xbu >> 4) & 0xF).to(tl.bfloat16)
+        wu = tl.reshape(tl.trans(tl.join(lou, hiu), 0, 2, 1), (GPC, BNC))
+        wud = (wu.to(tl.float32) - zu[None, :]) * su[None, :]
+        wud = tl.where(glane[:, None], wud, 0.0)
+        accu = tl.dot(xg, wud.to(tl.bfloat16), accu)
+
+    tl.store(wsg_ptr + sk * M * N + rm[:, None] * N + rn[None, :], accg,
+             mask=mmask[:, None] & nmask[None, :])
+    tl.store(wsu_ptr + sk * M * N + rm[:, None] * N + rn[None, :], accu,
+             mask=mmask[:, None] & nmask[None, :])
+
+
+@triton.jit
+def _gated_gemv_reduce(wsg_ptr, wsu_ptr, y_ptr, MN,
+                       SPLITK: tl.constexpr, BLK: tl.constexpr):
+    pid = tl.program_id(0)
+    idx = pid * BLK + tl.arange(0, BLK)
+    mask = idx < MN
+    g = tl.zeros((BLK,), dtype=tl.float32)
+    u = tl.zeros((BLK,), dtype=tl.float32)
+    for kk in range(SPLITK):
+        g += tl.load(wsg_ptr + kk * MN + idx, mask=mask, other=0.0)
+        u += tl.load(wsu_ptr + kk * MN + idx, mask=mask, other=0.0)
+    out = (g * tl.sigmoid(g)) * u
+    tl.store(y_ptr + idx, out.to(tl.bfloat16), mask=mask)
+
+
+_MAX_SPLITK = 32
+
+
+def _quantize(w_full: torch.Tensor, group_size: int):
+    K, N = w_full.shape
+    n_groups = (K + group_size - 1) // group_size
+    K_pad = n_groups * group_size
+    if K_pad > K:
+        w_padded = torch.zeros(K_pad, N, dtype=w_full.dtype)
+        w_padded[:K] = w_full
+    else:
+        w_padded = w_full
+    w_grouped = w_padded.view(n_groups, group_size, N)
+    mn = w_grouped.min(dim=1).values
+    mx = w_grouped.max(dim=1).values
+    sc = (mx - mn).clamp_min(1e-8) / 15.0
+    zp = (-mn / sc).round().clamp(0, 15)
+    w_q_grouped = ((w_grouped / sc.unsqueeze(1)) + zp.unsqueeze(1)).round().clamp(0, 15).to(torch.uint8)
+    w_q = w_q_grouped.view(K_pad, N)[:K].contiguous()
+    return w_q, sc.to(torch.bfloat16), zp.to(torch.bfloat16)
+
+
+class Model(nn.Module):
+    def __init__(self, M: int, N: int, K: int, group_size: int = GROUP):
+        super().__init__()
+        assert K % 2 == 0
+        self.M, self.N, self.K = M, N, K
+        self.group_size = group_size
+        torch.manual_seed(0x9C ^ (M * 1315423911 + N * 2654435761 + K))
+        for name in ("gate", "up"):
+            w_full = torch.randn(K, N, dtype=torch.float32) * 0.02
+            w_q, scales, zeros = _quantize(w_full, group_size)
+            lo = w_q[0::2].to(torch.uint8) & 0xF
+            hi = w_q[1::2].to(torch.uint8) & 0xF
+            self.register_buffer(f"w_q_{name}", (lo | (hi << 4)).contiguous())
+            self.register_buffer(f"scales_{name}", scales)
+            self.register_buffer(f"zeros_{name}", zeros)
+        self._graph = None
+        self._graph_key = None
+        self._graph_out = None
+
+    def _compute(self, x):
+        M, N, K = self.M, self.N, self.K
+        ngroups = (K + GROUP - 1) // GROUP
+        bm = max(16, 1 << (M - 1).bit_length())
+        MN = M * N
+        wsg = torch.empty(_MAX_SPLITK * MN, dtype=torch.float32, device=x.device)
+        wsu = torch.empty(_MAX_SPLITK * MN, dtype=torch.float32, device=x.device)
+        y = torch.empty(M, N, dtype=torch.bfloat16, device=x.device)
+        grid = lambda meta: (meta["SPLITK"] * triton.cdiv(N, meta["BNC"]),)
+        _gated_gemv_splitk[grid](
+            x, self.w_q_gate, self.w_q_up,
+            self.scales_gate, self.scales_up, self.zeros_gate, self.zeros_up,
+            wsg, wsu, M, N, K, ngroups, BMC=bm)
+        splitk = _gated_gemv_splitk.best_config.kwargs["SPLITK"]
+        BLK = 1024
+        _gated_gemv_reduce[(triton.cdiv(MN, BLK),)](wsg, wsu, y, MN,
+                                                    SPLITK=splitk, BLK=BLK)
+        return y
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        key = (x.data_ptr(), tuple(x.shape))
+        if self._graph is not None and self._graph_key == key:
+            self._graph.replay()
+            return self._graph_out
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for _ in range(2):
+                out = self._compute(x)
+        torch.cuda.current_stream().wait_stream(s)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            out = self._compute(x)
+        self._graph = g
+        self._graph_key = key
+        self._graph_out = out
+        g.replay()
+        return out
+
+
+M = 1
+N = 11008
+K = 4096
+
+
+def get_inputs():
+    x = torch.randn(M, K, dtype=torch.bfloat16)
+    return [x]
+
+
+def get_init_inputs():
+    return [M, N, K]

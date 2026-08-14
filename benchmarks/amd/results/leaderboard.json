@@ -176,13 +176,13 @@
           "solution_url": "/runs/qwen38_01_fp8_gemm_v3_solution.py.txt"
         },
         "01_dequant_gemv": {
-          "run_id": "qwen38_01_dequant_gemv",
+          "run_id": "qwen38_01_dequant_gemv_v2",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0046,
+          "peak_fraction": 0.0302,
           "failure_reason": null,
           "retryable_infra_failure": false,
-          "solution_url": "/runs/qwen38_01_dequant_gemv_solution.py.txt"
+          "solution_url": "/runs/qwen38_01_dequant_gemv_v2_solution.py.txt"
         },
         "01_glm52_fused_moe": {
           "run_id": "qwen38_01_glm52_fused_moe",
@@ -315,16 +315,16 @@
     "01_dequant_gemv": {
       "n_attempted": 2,
       "n_passed": 2,
-      "best_peak_fraction": 0.0177,
-      "best_model": "glm-5.2",
+      "best_peak_fraction": 0.0302,
+      "best_model": "qwen-3.8",
       "ranked_passes": [
+        {
+          "model": "qwen-3.8",
+          "peak_fraction": 0.0302
+        },
         {
           "model": "glm-5.2",
           "peak_fraction": 0.0177
-        },
-        {
-          "model": "qwen-3.8",
-          "peak_fraction": 0.0046
         }
       ]
     },

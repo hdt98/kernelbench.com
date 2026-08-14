@@ -1,0 +1,10 @@
+run_id: qwen38_01_dequant_gemv_v2
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 01_dequant_gemv
+peak_fraction: 0.0302
+
+verdict: clean
+
+summary: "v2 supersedes the v1 cell. Genuine Triton gated W4A16 dequant-GEMV (same group-96 ragged unpack/dequant body as v1: 96-group lanes padded to 128, both nibbles expanded via join/trans/reshape, (w - z) * s dequant, bf16 tl.dot with fp32 accumulate, ragged final group masked off naturally, M<=4 activation tile padded to 16, silu(gate)*up epilogue, CUDA-graphed forward) with one structural upgrade: v1 walked the whole K axis in ONE program per N tile -- only ~36-108 programs while the decode shapes are bandwidth-bound on the two int4 weight streams -- so v2 splits the ceil(K/96) groups into SPLITK autotuned slices (4-32) over an (N/BN) x SPLITK grid, writing fp32 gate/up partials that a reduce kernel sums before applying the silu epilogue in fp32. Official geomean 0.0302 (shapes 0.0336/0.0251/0.0360/0.0275) vs v1 0.0046. Same solution file as the MI350X v2 cell (md5 9f9f994d). check.py PASS (fresh seeds + numeric stress) on Triton 3.1.0/ROCm 6.2. RESULT: LOW is the bench's informational geomean<0.1 marker, not a correctness failure. No cheat patterns."

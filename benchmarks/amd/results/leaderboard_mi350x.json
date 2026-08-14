@@ -127,13 +127,13 @@
       "effort": "xhigh",
       "results": {
         "01_dequant_gemv": {
-          "run_id": "qwen38_mi350x_01_dequant_gemv",
+          "run_id": "qwen38_mi350x_01_dequant_gemv_v2",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0238,
+          "peak_fraction": 0.0669,
           "failure_reason": null,
           "retryable_infra_failure": false,
-          "solution_url": "/runs/qwen38_mi350x_01_dequant_gemv_solution.py.txt"
+          "solution_url": "/runs/qwen38_mi350x_01_dequant_gemv_v2_solution.py.txt"
         },
         "02_kda_cutlass": {
           "run_id": "qwen38_mi350x_02_kda_cutlass",
@@ -223,12 +223,12 @@
     "01_dequant_gemv": {
       "n_attempted": 2,
       "n_passed": 2,
-      "best_peak_fraction": 0.0238,
+      "best_peak_fraction": 0.0669,
       "best_model": "qwen-3.8",
       "ranked_passes": [
         {
           "model": "qwen-3.8",
-          "peak_fraction": 0.0238
+          "peak_fraction": 0.0669
         },
         {
           "model": "glm-5.2",
