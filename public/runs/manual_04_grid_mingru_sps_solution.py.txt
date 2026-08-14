@@ -1,8 +1,8 @@
 """Grid + 3xMinGRU SPS via Triton on AMD MI325X.
 
-Uses a Triton kernel for the GRU gate fusion (sigmoid gating + highway).
-tanh is computed in PyTorch (matching reference precision on gfx942).
-env_step uses PyTorch (must match reference exactly for LCG).
+v3: Same as v1 (proven Triton GRU gate kernel, PyTorch obs/tanh) but with
+env_step optimized: delta lookup table replaces 4 torch.where calls,
+torch.where replaces clone+index for food update.
 """
 import torch
 import torch.nn as nn
@@ -51,7 +51,6 @@ def _triton_gru_gate(gates, st, h):
     N = gates.shape[0]
     H = HIDDEN
     zh, zg, zp = gates.split(H, dim=-1)
-    # tanh in PyTorch for accuracy; .contiguous() so kernel stride = H
     g_zh = torch.tanh(zh)
     zg_c = zg.contiguous()
     zp_c = zp.contiguous()
@@ -69,6 +68,15 @@ def _triton_gru_gate(gates, st, h):
         p = torch.sigmoid(zp)
         hnew = p * out + (1.0 - p) * h
         return out, hnew
+
+
+_DELTA_TABLE = None
+
+def _get_delta_table(device):
+    global _DELTA_TABLE
+    if _DELTA_TABLE is None or _DELTA_TABLE.device != device:
+        _DELTA_TABLE = torch.tensor([[0, -1], [0, 1], [-1, 0], [1, 0]], device=device, dtype=torch.float32)
+    return _DELTA_TABLE
 
 
 class Model(nn.Module):
@@ -124,11 +132,7 @@ def _lcg_step(rng):
 
 
 def env_step(agent, food, actions, rng_state):
-    delta = torch.zeros_like(agent)
-    delta[:, 1] = torch.where(actions == 0, -torch.ones_like(delta[:, 1]), delta[:, 1])
-    delta[:, 1] = torch.where(actions == 1, torch.ones_like(delta[:, 1]), delta[:, 1])
-    delta[:, 0] = torch.where(actions == 2, -torch.ones_like(delta[:, 0]), delta[:, 0])
-    delta[:, 0] = torch.where(actions == 3, torch.ones_like(delta[:, 0]), delta[:, 0])
+    delta = _get_delta_table(agent.device)[actions]
     agent = (agent + delta).clamp(0, BOARD - 1)
     hit = (agent == food).all(dim=-1)
     reward = hit.float()
@@ -139,8 +143,7 @@ def env_step(agent, food, actions, rng_state):
         rng_state = _lcg_step(rng_state)
         fy = (rng_state % BOARD).to(agent.dtype)
         new_food = torch.stack([fx, fy], dim=-1)
-        food = food.clone()
-        food[hit] = new_food[hit]
+        food = torch.where(hit[:, None], new_food, food)
     return agent, food, reward, rng_state
 
 
@@ -179,3 +182,4 @@ def get_init_inputs():
 
 def get_inputs():
     return []
+
