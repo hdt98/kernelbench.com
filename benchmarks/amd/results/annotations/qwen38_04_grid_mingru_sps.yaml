@@ -1,0 +1,10 @@
+run_id: qwen38_04_grid_mingru_sps
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 04_grid_mingru_sps
+peak_fraction: 0.1632
+
+verdict: clean
+
+summary: "fp32 mirror of the reference policy math with each MinGRU layer's elementwise chain fused into a Triton kernel and the whole rollout CUDA-graph-captured (device-side pos/noise statics, graph warmup-rebind handled); the four GEMMs stay fp32 F.linear. No cheat patterns."

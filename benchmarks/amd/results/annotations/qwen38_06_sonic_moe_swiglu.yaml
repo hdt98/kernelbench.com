@@ -1,0 +1,10 @@
+run_id: qwen38_06_sonic_moe_swiglu
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 06_sonic_moe_swiglu
+peak_fraction: 0.0316
+
+verdict: clean
+
+summary: "Genuine single-kernel Triton grouped GEMM -- per-expert row ranges read from the offsets tensor (no host sync), dual fp32 accumulators for gate/up, silu(gate)*up epilogue before the bf16 store. No cheat patterns."

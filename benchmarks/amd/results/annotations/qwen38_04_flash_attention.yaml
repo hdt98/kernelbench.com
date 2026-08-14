@@ -1,0 +1,10 @@
+run_id: qwen38_04_flash_attention
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 04_flash_attention
+peak_fraction: 0.0622
+
+verdict: clean
+
+summary: "Genuine tiled causal flash-attention forward in Triton -- online softmax (running max/sum, fp32 accumulator), never materializes the S x S score matrix, masked ragged tails. No cheat patterns."

@@ -1,0 +1,10 @@
+run_id: qwen38_02_deepseek_nsa
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 02_deepseek_nsa
+peak_fraction: 0.0013
+
+verdict: clean
+
+summary: "Vectorized PyTorch re-derivation, no custom kernel (this problem's language gate does not require kernel evidence) -- block importance via key prefix means instead of an S x S score matrix, topk->scatter selection, causal sliding-window band union, dense bf16 masked attention with fp32 softmax, CUDA-graphed forward on input pointers. No cheat patterns; disclosed as torch-only (framework=unknown at the gate)."

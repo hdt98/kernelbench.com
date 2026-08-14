@@ -1,0 +1,10 @@
+run_id: qwen38_01_fp8_gemm
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 01_fp8_gemm
+peak_fraction: 0.0495
+
+verdict: clean
+
+summary: "Genuine Triton fp8 GEMM for gfx942 -- byte-domain handling of e4m3fn operands into the fnuz MFMA path (typed fp8e4nv loads are refused on this target), fp32 accumulate, autotuned tiling, CUDA-graphed forward. No cheat patterns. Disclosure: leftover .hip/.cpp sources from GLM's earlier published run sit in the problem dir (tracked, verified unmodified) and make collect_solution_sources label this cell framework=hip_raw; this solution is self-contained Triton and neither builds nor references those files."

@@ -1,0 +1,10 @@
+run_id: qwen38_01_glm52_fused_moe
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 01_glm52_fused_moe
+peak_fraction: 0.0335
+
+verdict: clean
+
+summary: "Genuine zero-transpose Triton grouped-GEMM MoE -- expert-major permutation via sort/bincount/index_select, then three segmented kernels reading the NATIVE (E,2I,H)/(E,H,I) weight layouts with transposed-stride tiles and single fp32 accumulators (gate, up, down) plus a torch SwiGLU epilogue, weighted index_add_ scatter and a dense shared-expert path. Built this way because the 12 GB weight transposes cannot coexist with the tenant workload on this shared box (genuine kernel per the no-torch-fallback policy for this problem). No cheat patterns."

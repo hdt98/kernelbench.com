@@ -1,0 +1,10 @@
+run_id: qwen38_03_topp_mask
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 03_topp_mask
+peak_fraction: 0.0003
+
+verdict: clean
+
+summary: "Sort-free top-p mask via two-level histogram thresholding in Triton -- atomic row sums plus per-row logit max in K1, histogram-based tau selection in K2; exact forced-keep set with the remainder inside the grader's documented free band. No cheat patterns."

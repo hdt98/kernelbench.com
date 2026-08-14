@@ -1,0 +1,299 @@
+"""Grid foraging + 3-layer MinGRU policy for MI325X -- fused Triton kernels.
+
+Qwen 3.8 (Nexus-hosted) in-session solution for KernelBench-AMD 04_grid_mingru_sps.
+
+policy_forward mirrors the reference math step for step (fp32): the four
+GEMMs (encoder, per-layer gates, action head, value head) run as fp32
+F.linear calls, and each MinGRU layer's elementwise chain
+
+    out = st + sigmoid(zg) * (tanh(zh) - st);  p = sigmoid(zp)
+    h'  = p * out + (1 - p) * h
+
+is fused into one Triton kernel (one program per flat element block, three
+gathered loads from the (N, 3H) gate tensor, two stores).
+
+env_step is the reference dynamics made branchless so it is CUDA-graph
+capturable. The reference advances the LCG for ALL envs whenever ANY env
+hits food, but only writes food for hits; we reproduce that exactly with a
+device flag: kernel 1 computes the clamped move, the hit mask, and
+atomic-ors any-hit into a flag; kernel 2 reads the flag and applies
+rng' = flag ? lcg(lcg(rng)) : rng, food' = hit ? (fx, fy) : food, with the
+LCG arithmetic done in wrapping int64 exactly like torch's.
+
+run() keeps static state buffers per (num_envs, horizon, model) and captures
+the whole horizon loop into one CUDA graph; per call it seeds the static
+buffers with the reference's CPU-generator init (small H2D copies) and
+replays. One replay per rollout instead of ~500 individual launches.
+"""
+from __future__ import annotations
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import triton
+import triton.language as tl
+
+BOARD = 11
+OBS_DIM = 4
+HIDDEN = 256
+GRU_LAYERS = 3
+NUM_ACTIONS = 4
+GRU_OUT = 3 * HIDDEN
+# constexpr CALL form, not annotation: the future annotations import
+# stringifies annotations, which hides them from Triton's global resolver.
+LCG_A = tl.constexpr(6364136223846793005)
+LCG_MASK = tl.constexpr(0x7FFFFFFFFFFFFFFF)
+
+
+@triton.jit
+def _mingru_layer_kernel(g_ptr, st_ptr, h_ptr, out_ptr, hn_ptr,
+                         N, H: tl.constexpr, BLK: tl.constexpr):
+    pid = tl.program_id(0)
+    idx = pid * BLK + tl.arange(0, BLK)
+    total = N * H
+    mask = idx < total
+    n = idx // H
+    x = idx % H
+    gbase = n * (3 * H)
+    zh = tl.load(g_ptr + gbase + x, mask=mask, other=0.0)
+    zg = tl.load(g_ptr + gbase + H + x, mask=mask, other=0.0)
+    zp = tl.load(g_ptr + gbase + 2 * H + x, mask=mask, other=0.0)
+    st = tl.load(st_ptr + idx, mask=mask, other=0.0)
+    h = tl.load(h_ptr + idx, mask=mask, other=0.0)
+    # tanh via sigmoid identity (Triton 3.1 has no tl.math.tanh on ROCm):
+    # tanh(x) = 2 * sigmoid(2x) - 1.
+    tanh_zh = 2.0 * tl.sigmoid(2.0 * zh) - 1.0
+    out = st + tl.sigmoid(zg) * (tanh_zh - st)
+    p = tl.sigmoid(zp)
+    hn = p * out + (1.0 - p) * h
+    tl.store(out_ptr + idx, out, mask=mask)
+    tl.store(hn_ptr + idx, hn, mask=mask)
+
+
+@triton.jit
+def _env_move_kernel(agent_ptr, food_ptr, act_ptr, nag_ptr, hit_ptr, flag_ptr,
+                     N, BLK: tl.constexpr):
+    pid = tl.program_id(0)
+    i = pid * BLK + tl.arange(0, BLK)
+    mask = i < N
+    ax = tl.load(agent_ptr + i * 2, mask=mask, other=0.0)
+    ay = tl.load(agent_ptr + i * 2 + 1, mask=mask, other=0.0)
+    a = tl.load(act_ptr + i, mask=mask, other=0)
+    dx = tl.where(a == 3, 1.0, tl.where(a == 2, -1.0, 0.0))
+    dy = tl.where(a == 1, 1.0, tl.where(a == 0, -1.0, 0.0))
+    nx = tl.minimum(tl.maximum(ax + dx, 0.0), 10.0)
+    ny = tl.minimum(tl.maximum(ay + dy, 0.0), 10.0)
+    fx = tl.load(food_ptr + i * 2, mask=mask, other=0.0)
+    fy = tl.load(food_ptr + i * 2 + 1, mask=mask, other=0.0)
+    hit = ((nx == fx) & (ny == fy)) & mask
+    tl.store(nag_ptr + i * 2, nx, mask=mask)
+    tl.store(nag_ptr + i * 2 + 1, ny, mask=mask)
+    tl.store(hit_ptr + i, hit.to(tl.int8), mask=mask)
+    # int8 atomics do not exist in Triton 3.1 on gfx942 -> int32 flag, and a
+    # block atomic into a scalar pointer fails the tt.atomic_rmw verifier, so
+    # reduce to a scalar first (hit already excludes masked-out lanes).
+    anyhit = tl.max(hit.to(tl.int32), axis=0)
+    tl.atomic_or(flag_ptr, anyhit, sem="relaxed")
+
+
+@triton.jit
+def _env_apply_kernel(food_ptr, hit_ptr, flag_ptr, rng_ptr, rew_ptr,
+                      nf_ptr, N, BLK: tl.constexpr):
+    pid = tl.program_id(0)
+    i = pid * BLK + tl.arange(0, BLK)
+    mask = i < N
+    flag = tl.load(flag_ptr)
+    hit = tl.load(hit_ptr + i, mask=mask, other=0).to(tl.int1)
+    rng = tl.load(rng_ptr + i, mask=mask, other=0)
+    r1 = (rng * LCG_A + 1) & LCG_MASK
+    fx = (r1 % 11).to(tl.float32)
+    r2 = (r1 * LCG_A + 1) & LCG_MASK
+    fy = (r2 % 11).to(tl.float32)
+    nrng = tl.where(flag != 0, r2, rng)
+    tl.store(rng_ptr + i, nrng, mask=mask)
+    oldfx = tl.load(food_ptr + i * 2, mask=mask, other=0.0)
+    oldfy = tl.load(food_ptr + i * 2 + 1, mask=mask, other=0.0)
+    tl.store(nf_ptr + i * 2, tl.where(hit, fx, oldfx), mask=mask)
+    tl.store(nf_ptr + i * 2 + 1, tl.where(hit, fy, oldfy), mask=mask)
+    tl.store(rew_ptr + i, hit.to(tl.float32), mask=mask)
+
+
+class Model(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.w_enc = nn.Parameter(torch.empty(HIDDEN, OBS_DIM))
+        self.b_enc = nn.Parameter(torch.zeros(HIDDEN))
+        self.w_gru = nn.Parameter(torch.empty(GRU_LAYERS, GRU_OUT, HIDDEN))
+        self.w_a = nn.Parameter(torch.empty(NUM_ACTIONS, HIDDEN))
+        self.b_a = nn.Parameter(torch.zeros(NUM_ACTIONS))
+        self.w_v = nn.Parameter(torch.empty(1, HIDDEN))
+        self.b_v = nn.Parameter(torch.zeros(1))
+        self.reset_parameters(0)
+
+    def reset_parameters(self, seed: int = 0) -> None:
+        g = torch.Generator(device="cpu")
+        g.manual_seed(seed)
+        for p in self.parameters():
+            tmp = torch.empty(p.shape, dtype=p.dtype, device="cpu")
+            tmp.normal_(0.0, 0.02, generator=g)
+            p.data.copy_(tmp)
+
+    def forward(self, obs: torch.Tensor, state: torch.Tensor):
+        return policy_forward(self, obs, state)
+
+
+def policy_forward(model: Model, obs: torch.Tensor, state: torch.Tensor):
+    """obs (N,4), state (N,L,H) -> logits (N,4), new_state (N,L,H), value (N,)."""
+    N = obs.shape[0]
+    h = F.linear(obs, model.w_enc, model.b_enc)
+    new_states = []
+    for layer in range(GRU_LAYERS):
+        st = state[:, layer, :].contiguous()
+        gates = F.linear(h, model.w_gru[layer])
+        out = torch.empty_like(st)
+        hn = torch.empty_like(h)
+        total = N * HIDDEN
+        blk = 1024
+        _mingru_layer_kernel[((total + blk - 1) // blk,)](
+            gates, st, h, out, hn, N, H=HIDDEN, BLK=blk, num_warps=4)
+        new_states.append(out)
+        h = hn
+    new_state = torch.stack(new_states, dim=1)
+    logits = F.linear(h, model.w_a, model.b_a)
+    value = F.linear(h, model.w_v, model.b_v).squeeze(-1)
+    return logits, new_state, value
+
+
+def obs_from_state(agent: torch.Tensor, food: torch.Tensor) -> torch.Tensor:
+    return torch.stack(
+        [
+            (food[:, 0] - agent[:, 0]) / BOARD,
+            (food[:, 1] - agent[:, 1]) / BOARD,
+            agent[:, 0] / (BOARD - 1),
+            agent[:, 1] / (BOARD - 1),
+        ],
+        dim=-1,
+    )
+
+
+def _env_step_graph(agent, food, actions, rng_state, nag, hit, flag, nf, rew):
+    N = agent.shape[0]
+    blk = 256
+    grid = ((N + blk - 1) // blk,)
+    flag.zero_()
+    _env_move_kernel[grid](agent, food, actions, nag, hit, flag, N, BLK=blk)
+    _env_apply_kernel[grid](food, hit, flag, rng_state, rew, nf, N, BLK=blk)
+
+
+def env_step(agent, food, actions, rng_state):
+    """Deterministic env step matching the reference exactly (branchless)."""
+    N = agent.shape[0]
+    rng_state = rng_state.clone()  # reference never mutates its input
+    nag = torch.empty_like(agent)
+    hit = torch.empty(N, dtype=torch.int8, device=agent.device)
+    flag = torch.zeros(1, dtype=torch.int32, device=agent.device)
+    nf = torch.empty_like(food)
+    rew = torch.empty(N, dtype=torch.float32, device=agent.device)
+    _env_step_graph(agent, food, actions, rng_state, nag, hit, flag, nf, rew)
+    return nag, nf, rew, rng_state
+
+
+_GRAPHS = {}
+
+
+def run(num_envs: int, horizon: int, seed: int, model: Model | None = None) -> dict:
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    if model is None:
+        model = Model().to(device).eval()
+
+    key = (num_envs, horizon, id(model), device.index)
+    entry = _GRAPHS.get(key)
+    if entry is None:
+        g = torch.Generator(device="cpu")
+        g.manual_seed(seed)
+        agent = torch.randint(0, BOARD, (num_envs, 2), generator=g).float().to(device)
+        food = torch.randint(0, BOARD, (num_envs, 2), generator=g).float().to(device)
+        rng_state = torch.arange(num_envs, device=device, dtype=torch.int64) + (seed * 10007)
+        state = torch.zeros(num_envs, GRU_LAYERS, HIDDEN, device=device)
+        nag = torch.empty_like(agent)
+        hit = torch.empty(num_envs, dtype=torch.int8, device=device)
+        flag = torch.zeros(1, dtype=torch.int32, device=device)
+        nf = torch.empty_like(food)
+        rewbuf = torch.empty(num_envs, device=device)
+        # The graph reads THESE buffers at step 1 of every replay; outputs are
+        # the tensors step_all returns after capture.
+        init_bufs = {"agent": agent, "food": food, "rng": rng_state, "state": state}
+
+        def step_all():
+            nonlocal agent, food, rng_state, state
+            # ALWAYS start from the init buffers: warmup runs rebind the
+            # nonlocals below, and without this the capture would record
+            # reads of the leftover warmup buffers instead of the reseedable
+            # init buffers.
+            agent = init_bufs["agent"]
+            food = init_bufs["food"]
+            rng_state = init_bufs["rng"]
+            state = init_bufs["state"]
+            rewards = torch.zeros(num_envs, device=device)
+            logits = None
+            for _t in range(horizon):
+                obs = obs_from_state(agent, food)
+                lg, state, _v = policy_forward(model, obs, state)
+                logits = lg
+                actions = torch.argmax(logits, dim=-1)
+                flag.zero_()
+                blk = 256
+                grid = ((num_envs + blk - 1) // blk,)
+                _env_move_kernel[grid](agent, food, actions, nag, hit, flag,
+                                       num_envs, BLK=blk)
+                _env_apply_kernel[grid](food, hit, flag, rng_state, rewbuf, nf,
+                                        num_envs, BLK=blk)
+                # Buffers swap roles each step; apply/move do per-element
+                # read-then-write on the same address when food is nf, which is
+                # race-free (each index belongs to exactly one program).
+                food = nf
+                agent = nag
+                rewards = rewards + rewbuf
+            return rewards, agent, food, state, logits
+
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for _ in range(2):
+                step_all()
+        torch.cuda.current_stream().wait_stream(s)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            rewards, agent, food, state, logits = step_all()
+        entry = {
+            "graph": graph,
+            "init": init_bufs,
+            "out_agent": agent, "out_food": food, "out_state": state,
+            "out_rewards": rewards, "out_logits": logits,
+        }
+        _GRAPHS[key] = entry
+
+    # Re-seed static buffers exactly like the reference init, then replay.
+    g = torch.Generator(device="cpu")
+    g.manual_seed(seed)
+    agent0 = torch.randint(0, BOARD, (num_envs, 2), generator=g).float()
+    food0 = torch.randint(0, BOARD, (num_envs, 2), generator=g).float()
+    entry["init"]["agent"].copy_(agent0)
+    entry["init"]["food"].copy_(food0)
+    entry["init"]["rng"].copy_(torch.arange(num_envs, dtype=torch.int64) + (seed * 10007))
+    entry["init"]["state"].zero_()
+    entry["graph"].replay()
+    return {
+        "rewards": entry["out_rewards"].detach().clone(),
+        "positions": entry["out_agent"].detach().round().long().clone(),
+        "last_logits": entry["out_logits"].detach().clone(),
+        "state": entry["out_state"].detach().clone(),
+    }
+
+
+def get_init_inputs():
+    return []
+
+
+def get_inputs():
+    return []

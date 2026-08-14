@@ -1,0 +1,10 @@
+run_id: qwen38_03_megaqwen_decode
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 03_megaqwen_decode
+peak_fraction: 0.0029
+
+verdict: clean
+
+summary: "fp32 mirror of the reference numerics with a CUDA-graphed 64-step rollout -- device-incremented position buffer, precomputed rope table, GQA-grouped bf16 bmm attention straight on cache views (fp32 accumulate and softmax), fp32 weight copies built once per prefill, smaller-cap graph pools evicted as capacity grows. No custom kernel (the gate does not require kernel evidence for this whole-model decode problem). No cheat patterns; disclosed as torch+graphs (framework=pytorch_only)."

@@ -1,0 +1,10 @@
+run_id: qwen38_02_kda_cutlass
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 02_kda_cutlass
+peak_fraction: 0.0
+
+verdict: clean
+
+summary: "Triton kernel for the intra-chunk K.K interaction ((k odot exp(g)) @ (k odot exp(-g))^T, fp32 ieee) plus batched matmuls for the rest of the chunked closed form, replacing the reference's two O(BT) python loops. Peak fraction 0.0 -- the same floor as GLM's published cell on this problem. No cheat patterns."

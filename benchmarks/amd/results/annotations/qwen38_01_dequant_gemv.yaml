@@ -1,0 +1,10 @@
+run_id: qwen38_01_dequant_gemv
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 01_dequant_gemv
+peak_fraction: 0.0046
+
+verdict: clean
+
+summary: "Genuine Triton int4 group-96 ragged dequant-GEMV -- streams packed uint8 per K-group, nibble unpack to bf16 tiles, per-group asymmetric (w-z)*s dequant, fp32 tl.dot accumulation, gated silu*mul epilogue in one kernel. No cheat patterns."

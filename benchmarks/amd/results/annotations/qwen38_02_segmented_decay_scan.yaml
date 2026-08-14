@@ -1,0 +1,10 @@
+run_id: qwen38_02_segmented_decay_scan
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 02_segmented_decay_scan
+peak_fraction: 0.067
+
+verdict: clean
+
+summary: "Genuine three-kernel chunked associative scan in Triton captured as one CUDA graph -- reset folded into the per-step multiplier, local fp32 scans per 64-step chunk, cross-chunk propagate, final apply. No cheat patterns."

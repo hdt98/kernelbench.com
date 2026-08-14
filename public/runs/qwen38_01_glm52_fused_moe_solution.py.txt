@@ -1,0 +1,211 @@
+"""GLM-5.2-class fused MoE for MI325X -- expert-segmented grouped GEMM in Triton.
+
+Qwen 3.8 (Nexus-hosted) in-session solution for KernelBench-AMD
+01_glm52_fused_moe.
+
+out = shared(x) + sum_k w_k * expert_{id_k}(x), where each expert is the
+SwiGLU FFN silu(x @ W1g.T) * (x @ W1u.T) @ W2.T, weights vLLM-style packed:
+w1_routed (E, 2I, H) with gate rows [0, I) and up rows [I, 2I).
+
+Permutation (torch device ops): flat (T*top_k) expert ids sorted into
+expert-major order -> counts -> int32 offsets -> x_perm = x[token_idx]
+contiguous. Each expert's rows then occupy one contiguous segment, so the
+grouped GEMMs use the robust segmented pattern (one 1D grid over
+E x row-tiles x col-tiles, per-program expert from pid arithmetic, row/col
+masks on the tail tile, early exit past an expert's row count).
+
+ZERO weight-transpose design (this box shares VRAM with a tenant workload,
+so the forward may only add ~1 GB of scratch on top of the model weights):
+the kernels read the NATIVE weight layouts directly. The dot needs a
+(K, N) weight tile while w1 is stored (2I, H) / w2 (H, I) per expert, so
+each tile is loaded with transposed strides (k contiguous, n strided) into
+a SINGLE fp32 accumulator -- the load pattern previously verified stable on
+gfx942. Three kernels:
+
+  gate: x_perm seg @ W1[e, 0:I ]^T -> g_perm (L, I)
+  up:   x_perm seg @ W1[e, I:2I]^T -> u_perm (L, I)
+  swiglu (torch elementwise): h_perm = silu(g_perm) * u_perm
+  down: h_perm seg @ W2[e]^T       -> y_perm (L, H)
+
+Then y_perm is scaled by the routing weights and index_add_-ed back to the
+original token rows (fp32 accumulation), plus the always-on shared expert as
+a plain dense path (allowed torch ops). bf16 GEMM inputs with fp32
+accumulate, mirroring the reference inside the 8e-2 bf16 tolerance. Eager
+execution (no CUDA graph): the permutation needs one host sync for the grid
+size, and three kernel launches are negligible next to ~10 ms of grouped
+GEMM.
+"""
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import triton
+import triton.language as tl
+
+BM = 128
+BN = 128
+BK = 64
+
+
+@triton.jit
+def _moe_w1_kernel(x_ptr, off_ptr, w1_ptr, out_ptr,
+                   H, I, TM, UP_OFF: tl.constexpr,
+                   BMC: tl.constexpr, BNC: tl.constexpr, BKC: tl.constexpr):
+    """out_seg = x_seg @ W1[e, UP_OFF : UP_OFF + I]^T (single fp32 acc).
+
+    w1 is the native (E, 2I, H) parameter; the (BK, BN) weight tile is
+    loaded with transposed strides: element [n, k] lives at n*H + k.
+    """
+    pid = tl.program_id(0)
+    nt = tl.cdiv(I, BNC)
+    ntile = pid % nt
+    emt = pid // nt
+    e = emt // TM
+    tm = emt % TM
+
+    start = tl.load(off_ptr + e)
+    end = tl.load(off_ptr + e + 1)
+    ne = end - start
+    if tm * BMC >= ne:
+        return
+
+    rm = start + tm * BMC + tl.arange(0, BMC)
+    mmask = rm < end
+    cn = ntile * BNC + tl.arange(0, BNC)      # output col, 0..I
+    nmask = cn < I
+    rn = UP_OFF + cn                          # weight row in (2I, H)
+    rk = tl.arange(0, BKC)
+
+    acc = tl.zeros((BMC, BNC), dtype=tl.float32)
+    wbase = e.to(tl.int64) * (2 * I) * H
+    for kk in range(0, H, BKC):
+        kmask = (kk + rk) < H
+        xt = tl.load(x_ptr + rm[:, None] * H + kk + rk[None, :],
+                     mask=mmask[:, None] & kmask[None, :], other=0.0)
+        wt = tl.load(w1_ptr + wbase + rn[None, :] * H + (kk + rk)[:, None],
+                     mask=nmask[None, :] & kmask[:, None], other=0.0)
+        acc = tl.dot(xt, wt, acc)
+
+    tl.store(out_ptr + rm[:, None] * I + cn[None, :], acc.to(tl.bfloat16),
+             mask=mmask[:, None] & nmask[None, :])
+
+
+@triton.jit
+def _moe_w2_kernel(h_ptr, off_ptr, w2_ptr, y_ptr,
+                   H, I, TM,
+                   BMC: tl.constexpr, BNC: tl.constexpr, BKC: tl.constexpr):
+    """y_seg = h_seg @ W2[e]^T; w2 is the native (E, H, I) parameter."""
+    pid = tl.program_id(0)
+    nt = tl.cdiv(H, BNC)
+    ntile = pid % nt
+    emt = pid // nt
+    e = emt // TM
+    tm = emt % TM
+
+    start = tl.load(off_ptr + e)
+    end = tl.load(off_ptr + e + 1)
+    ne = end - start
+    if tm * BMC >= ne:
+        return
+
+    rm = start + tm * BMC + tl.arange(0, BMC)
+    mmask = rm < end
+    cn = ntile * BNC + tl.arange(0, BNC)      # output col, 0..H
+    nmask = cn < H
+    rk = tl.arange(0, BKC)
+
+    acc = tl.zeros((BMC, BNC), dtype=tl.float32)
+    wbase = e.to(tl.int64) * H * I
+    for kk in range(0, I, BKC):
+        kmask = (kk + rk) < I
+        ht = tl.load(h_ptr + rm[:, None] * I + kk + rk[None, :],
+                     mask=mmask[:, None] & kmask[None, :], other=0.0)
+        wt = tl.load(w2_ptr + wbase + cn[None, :] * I + (kk + rk)[:, None],
+                     mask=nmask[None, :] & kmask[:, None], other=0.0)
+        acc = tl.dot(ht, wt, acc)
+
+    tl.store(y_ptr + rm[:, None] * H + cn[None, :], acc.to(tl.bfloat16),
+             mask=mmask[:, None] & nmask[None, :])
+
+
+class Model(nn.Module):
+    def __init__(self, T: int, E: int, top_k: int, n_shared: int, H: int, I: int):  # noqa: E741
+        super().__init__()
+        self.T, self.E, self.top_k = T, E, top_k
+        self.n_shared, self.H, self.I = n_shared, H, I
+        self.w1_routed = nn.Parameter(torch.empty(E, 2 * I, H, dtype=torch.bfloat16))
+        self.w2_routed = nn.Parameter(torch.empty(E, H, I, dtype=torch.bfloat16))
+        self.w1_shared = nn.Parameter(torch.empty(n_shared, 2 * I, H, dtype=torch.bfloat16))
+        self.w2_shared = nn.Parameter(torch.empty(n_shared, H, I, dtype=torch.bfloat16))
+        for p in self.parameters():
+            p.data.zero_()
+
+    def forward(self, x, expert_ids, expert_weights):
+        T, E, top_k = self.T, self.E, self.top_k
+        H, I = self.H, self.I
+        dev = x.device
+        L = T * top_k
+
+        # --- expert-major permutation (device ops; one host sync for grid) ---
+        flat_e = expert_ids.reshape(-1)
+        sorted_e, sort_idx = flat_e.sort()
+        counts = torch.bincount(sorted_e, minlength=E)
+        offsets = torch.zeros(E + 1, dtype=torch.int32, device=dev)
+        offsets[1:] = counts.cumsum(0).to(torch.int32)
+        token_idx = sort_idx // top_k
+        x_perm = x.index_select(0, token_idx)
+        w_sorted = expert_weights.reshape(-1).gather(0, sort_idx)
+
+        max_n = int(counts.max().item())
+        tm = (max_n + BM - 1) // BM
+        nt_w1 = (I + BN - 1) // BN
+        nt_w2 = (H + BN - 1) // BN
+
+        # --- gate and up grouped GEMMs on the NATIVE (E, 2I, H) weights ---
+        g_perm = torch.empty(L, I, dtype=torch.bfloat16, device=dev)
+        u_perm = torch.empty(L, I, dtype=torch.bfloat16, device=dev)
+        _moe_w1_kernel[(E * tm * nt_w1,)](
+            x_perm, offsets, self.w1_routed.data, g_perm, H, I, tm,
+            UP_OFF=0, BMC=BM, BNC=BN, BKC=BK, num_warps=8)
+        _moe_w1_kernel[(E * tm * nt_w1,)](
+            x_perm, offsets, self.w1_routed.data, u_perm, H, I, tm,
+            UP_OFF=I, BMC=BM, BNC=BN, BKC=BK, num_warps=8)
+
+        # --- SwiGLU epilogue, then down grouped GEMM on NATIVE (E, H, I) ---
+        h_perm = (F.silu(g_perm.float()) * u_perm.float()).to(torch.bfloat16)
+        y_perm = torch.empty(L, H, dtype=torch.bfloat16, device=dev)
+        _moe_w2_kernel[(E * tm * nt_w2,)](
+            h_perm, offsets, self.w2_routed.data, y_perm, H, I, tm,
+            BMC=BM, BNC=BN, BKC=BK, num_warps=8)
+
+        out = torch.zeros(T, H, dtype=torch.float32, device=dev)
+        out.index_add_(0, token_idx,
+                       y_perm.float() * w_sorted.float().unsqueeze(1))
+
+        # --- shared experts: dense path (n_shared is tiny, always-on) ---
+        xf = x.float()
+        for s in range(self.n_shared):
+            w1s = self.w1_shared[s].float()
+            gate = xf @ w1s[:I].t()
+            up = xf @ w1s[I:].t()
+            hs = F.silu(gate) * up
+            out = out + hs @ self.w2_shared[s].float().t()
+
+        return out.to(torch.bfloat16)
+
+
+# Same default shape and input distribution as the reference deck entry
+# (standalone: this problem forbids importing the reference module).
+T, E, TOP_K, N_SHARED, H, I = 4096, 256, 8, 1, 4096, 2048
+
+
+def get_inputs():
+    x = torch.randn(T, H, dtype=torch.bfloat16)
+    logits = torch.randn(T, E) + torch.linspace(0.3, 0.0, E).unsqueeze(0)
+    vals, ids = torch.topk(logits, k=TOP_K, dim=-1)
+    weights = torch.softmax(vals, dim=-1).to(torch.bfloat16)
+    return [x, ids.to(torch.int64), weights]
+
+
+def get_init_inputs():
+    return [T, E, TOP_K, N_SHARED, H, I]
+

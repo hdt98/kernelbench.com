@@ -1,0 +1,412 @@
+"""Qwen3-0.6B-geometry decode for MI325X -- fp32 mirror math + graphed rollout.
+
+Qwen 3.8 (Nexus-hosted) in-session solution for KernelBench-AMD
+03_megaqwen_decode.
+
+Strategy: reproduce the reference numerics op-for-op (bf16 weights and KV
+cache, ALL arithmetic in fp32 exactly like the reference, so errors do not
+compound across steps), while removing per-step launch overhead:
+
+  * fp32 copies of every weight matrix are built once per prefill (untimed)
+    and reused by decode, avoiding the reference's per-step bf16->fp32 casts.
+  * The per-step CPU noise stream (x_t = 0.5*randn + 0.5*h) is generated on
+    CPU up front in 64-step blocks and copied to a static device buffer, so
+    the whole step body is device-only and CUDA-graph-capturable.
+  * One 64-step graph is captured per (model, cache set); a static pos_buf
+    is advanced inside the graph, and the rope table / KV writes read it, so
+    the same graph replays for consecutive position chunks (prefill walks
+    131k positions as ~2k replays). Tail steps use a second small graph.
+  * Attention reads the KV cache up to a fixed capacity with a causal mask
+    driven by pos_buf (device-side), which keeps the graph shape-static.
+  * Attention is bf16 batched GEMM (fp32 accumulate) straight on cache
+    views, fp32 masked softmax -- no KV upcast/expand copies at all, so the
+    per-graph private pools stay small and long-context prefill costs one
+    bf16 KV read per step instead of repeated fp32 materializations.
+  * Graphs for superseded (smaller) capacities are evicted as the capacity
+    grows within a run, freeing their private memory pools.
+
+run() mirrors the reference protocol: prefill(ctx_len) untimed, then
+n_decode decode steps; returns last_hidden for the numeric check.
+"""
+from __future__ import annotations
+
+import math
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+HIDDEN = 1024
+INTERMEDIATE = 3072
+NUM_Q = 16
+NUM_KV = 8
+HEAD_DIM = 128
+NUM_LAYERS = 4
+EPS = 1e-6
+CHUNK = 64
+
+# Per-instance generation counter: safer key material than id(model), which
+# Python can reuse after garbage collection.
+_GEN = [0]
+
+
+def _rmsnorm(x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
+    var = x.pow(2).mean(dim=-1, keepdim=True)
+    return x * torch.rsqrt(var + EPS) * w
+
+
+class Block(nn.Module):
+    """Same parameter layout/names as the reference Block (state_dict match)."""
+
+    def __init__(self):
+        super().__init__()
+        H, I, D = HIDDEN, INTERMEDIATE, HEAD_DIM
+        self.input_ln = nn.Parameter(torch.ones(H, dtype=torch.bfloat16))
+        self.q_proj = nn.Parameter(torch.empty(NUM_Q * D, H, dtype=torch.bfloat16))
+        self.k_proj = nn.Parameter(torch.empty(NUM_KV * D, H, dtype=torch.bfloat16))
+        self.v_proj = nn.Parameter(torch.empty(NUM_KV * D, H, dtype=torch.bfloat16))
+        self.q_norm = nn.Parameter(torch.ones(D, dtype=torch.bfloat16))
+        self.k_norm = nn.Parameter(torch.ones(D, dtype=torch.bfloat16))
+        self.o_proj = nn.Parameter(torch.empty(H, NUM_Q * D, dtype=torch.bfloat16))
+        self.post_ln = nn.Parameter(torch.ones(H, dtype=torch.bfloat16))
+        self.gate_proj = nn.Parameter(torch.empty(I, H, dtype=torch.bfloat16))
+        self.up_proj = nn.Parameter(torch.empty(I, H, dtype=torch.bfloat16))
+        self.down_proj = nn.Parameter(torch.empty(H, I, dtype=torch.bfloat16))
+
+
+class Model(nn.Module):
+    def __init__(self, num_layers: int = NUM_LAYERS, max_seq: int = 131072):
+        super().__init__()
+        self.num_layers = num_layers
+        self.max_seq = max_seq
+        self.blocks = nn.ModuleList([Block() for _ in range(num_layers)])
+        # Lazily built runtime state (fp32 weights, rope table, static bufs,
+        # graphs). Rebuilt whenever prefill() runs, so re-initialized weights
+        # are always picked up.
+        self._rt = None
+        _GEN[0] += 1
+        self._gen = _GEN[0]
+        self._rt_gen = 0
+
+    def forward(self, x, k_caches, v_caches, position: int):
+        # Eager single-step path kept for API parity with the reference.
+        rt = self._build_runtime(x.device)
+        h = x
+        new_k, new_v = [], []
+        for i, block in enumerate(self.blocks):
+            h, kc, vc = _block_step_eager(block, rt[i], h, k_caches[i],
+                                          v_caches[i], position)
+            new_k.append(kc)
+            new_v.append(vc)
+        return h, new_k, new_v
+
+    # ------------------------------------------------------------------ #
+    def _build_runtime(self, device):
+        """fp32 weight copies + rope table, rebuilt each prefill."""
+        half = HEAD_DIM // 2
+        inv = 1.0 / (
+            10000
+            ** (torch.arange(0, half, device=device, dtype=torch.float32) / half)
+        )
+        pos_all = torch.arange(self.max_seq, device=device,
+                               dtype=torch.float32)
+        freqs = torch.outer(pos_all, inv)
+        rt = {
+            "cos": freqs.cos(),                      # (max_seq, half) fp32
+            "sin": freqs.sin(),
+            "scale": 1.0 / math.sqrt(HEAD_DIM),
+            "layers": [],
+        }
+        for block in self.blocks:
+            rt["layers"].append({
+                "ln1": block.input_ln.data.float(),
+                "wq": block.q_proj.data.float(),
+                "wk": block.k_proj.data.float(),
+                "wv": block.v_proj.data.float(),
+                "qn": block.q_norm.data.float(),
+                "kn": block.k_norm.data.float(),
+                "wo": block.o_proj.data.float(),
+                "ln2": block.post_ln.data.float(),
+                "wg": block.gate_proj.data.float(),
+                "wu": block.up_proj.data.float(),
+                "wd": block.down_proj.data.float(),
+            })
+        self._rt = rt
+        self._rt_gen += 1
+        return rt
+
+
+def _rope_apply(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor):
+    half = HEAD_DIM // 2
+    x1, x2 = x[..., :half], x[..., half:]
+    return torch.cat([x1 * cos - x2 * sin, x1 * sin + x2 * cos], dim=-1)
+
+
+def _block_step_eager(block, lw, x, k_cache, v_cache, position,
+                      cos_table=None, sin_table=None, scale=None):
+    """One reference-mirroring block step (used by Model.forward)."""
+    half = HEAD_DIM // 2
+    residual = x.float()
+    h = _rmsnorm(residual, lw["ln1"])
+    q = (h @ lw["wq"].T).view(NUM_Q, HEAD_DIM)
+    k = (h @ lw["wk"].T).view(NUM_KV, HEAD_DIM)
+    v = (h @ lw["wv"].T).view(NUM_KV, HEAD_DIM)
+    q = _rmsnorm(q, lw["qn"])
+    k = _rmsnorm(k, lw["kn"])
+    if cos_table is None:
+        inv = 1.0 / (
+            10000
+            ** (torch.arange(0, half, device=x.device, dtype=torch.float32) / half)
+        )
+        t = torch.tensor([position], device=x.device, dtype=torch.float32)
+        fr = torch.outer(t, inv)
+        cos, sin = fr.cos(), fr.sin()
+    else:
+        cos = cos_table[position]
+        sin = sin_table[position]
+    q = _rope_apply(q, cos, sin)
+    k = _rope_apply(k, cos, sin)
+    k_cache = k_cache.clone()
+    v_cache = v_cache.clone()
+    k_cache[:, position, :] = k.to(k_cache.dtype)
+    v_cache[:, position, :] = v.to(v_cache.dtype)
+    k_all = k_cache[:, : position + 1, :].float().repeat_interleave(2, dim=0)
+    v_all = v_cache[:, : position + 1, :].float().repeat_interleave(2, dim=0)
+    scores = torch.einsum("hd,hld->hl", q, k_all) * scale
+    att = torch.softmax(scores, dim=-1)
+    attn_out = torch.einsum("hl,hld->hd", att, v_all).reshape(-1)
+    attn_out = attn_out @ lw["wo"].T
+    h = residual + attn_out
+    residual = h
+    h = _rmsnorm(h, lw["ln2"])
+    gate = h @ lw["wg"].T
+    up = h @ lw["wu"].T
+    h = F.silu(gate) * up
+    h = h @ lw["wd"].T
+    y = residual + h
+    return y.to(torch.bfloat16), k_cache, v_cache
+
+
+_GRAPHS: dict = {}
+_STATICS: dict = {}
+CAP_BUCKET = 4096
+
+
+def _cap_for(end: int, max_seq: int) -> int:
+    """Bucketed attention capacity, never beyond the real cache length."""
+    return min(((end + CAP_BUCKET - 1) // CAP_BUCKET) * CAP_BUCKET, max_seq)
+
+
+def _statics(model: Model, device) -> dict:
+    key = getattr(model, "_gen", id(model))
+    st = _STATICS.get(key)
+    if st is None or st["device"] != device:
+        st = {
+            "device": device,
+            "pos": torch.zeros(1, dtype=torch.int64, device=device),
+            "noise": torch.zeros(CHUNK, HIDDEN, dtype=torch.bfloat16, device=device),
+            "h": torch.zeros(HIDDEN, dtype=torch.bfloat16, device=device),
+        }
+        _STATICS[key] = st
+    return st
+
+
+def _step_body(model: Model, rt: dict, st: dict, k_caches, v_caches,
+               noise_j: torch.Tensor, cap: int, key_idx: torch.Tensor):
+    """One decode step over the full block stack. Pure device ops."""
+    h = 0.5 * noise_j + 0.5 * st["h"]                      # bf16 mix, like ref
+    pos = st["pos"]                                        # (1,) int64 device
+    cos_row = rt["cos"].index_select(0, pos)               # (1, half)
+    sin_row = rt["sin"].index_select(0, pos)
+    half = HEAD_DIM // 2
+    for i, lw in enumerate(rt["layers"]):
+        residual = h.float()
+        hn = _rmsnorm(residual, lw["ln1"])
+        q = F.linear(hn, lw["wq"]).view(NUM_Q, HEAD_DIM)
+        k = F.linear(hn, lw["wk"]).view(NUM_KV, HEAD_DIM)
+        v = F.linear(hn, lw["wv"]).view(NUM_KV, HEAD_DIM)
+        q = _rmsnorm(q, lw["qn"])
+        k = _rmsnorm(k, lw["kn"])
+        q = _rope_apply(q, cos_row, sin_row)
+        k = _rope_apply(k, cos_row, sin_row)
+        kc = k_caches[i]
+        vc = v_caches[i]
+        kc[:, pos, :] = k.to(kc.dtype).unsqueeze(1)
+        vc[:, pos, :] = v.to(vc.dtype).unsqueeze(1)
+        # GQA-grouped bf16 bmm attention on cache views (fp32 accumulate);
+        # head order kv*rep + r matches the reference's repeat_interleave.
+        rep = NUM_Q // NUM_KV
+        qb = q.to(torch.bfloat16).view(NUM_KV, rep, HEAD_DIM)  # (KV, rep, D)
+        ks = kc[:, :cap].transpose(1, 2)             # (KV, D, cap) view
+        scores = torch.bmm(qb, ks).float() * rt["scale"]       # (KV, rep, cap)
+        scores = scores.masked_fill(key_idx[None, None, :] > pos.view(1, 1, 1),
+                                    float("-inf"))
+        att = torch.softmax(scores, dim=-1).to(torch.bfloat16)
+        ao = torch.bmm(att, vc[:, :cap]).float().reshape(-1)   # (KV*rep*D,)
+        attn_out = F.linear(ao, lw["wo"])
+        h2 = residual + attn_out
+        residual = h2
+        hn = _rmsnorm(h2, lw["ln2"])
+        gate = F.linear(hn, lw["wg"])
+        up = F.linear(hn, lw["wu"])
+        h2 = residual + F.linear(F.silu(gate) * up, lw["wd"])
+        h = h2.to(torch.bfloat16)
+    # Chain the hidden state through the static buffer so the NEXT step in the
+    # captured rollout reads this step's output (device copy_ is capturable).
+    # Without this, every step of a chunk mixes its noise with the
+    # pre-rollout hidden state instead of the previous step's output.
+    st["h"].copy_(h)
+    st["pos"].add_(1)
+    return h
+
+
+def _get_graph(model: Model, rt: dict, st: dict, k_caches, v_caches,
+               steps: int, cap: int):
+    key = (getattr(model, "_gen", id(model)),
+           getattr(model, "_rt_gen", 0), steps, cap,
+           tuple(t.data_ptr() for t in k_caches),
+           tuple(t.data_ptr() for t in v_caches))
+    entry = _GRAPHS.get(key)
+    if entry is not None:
+        return entry
+    key_idx = torch.arange(cap, device=st["device"], dtype=torch.int64)
+
+    def rollout():
+        h = None
+        for j in range(steps):
+            h = _step_body(model, rt, st, k_caches, v_caches,
+                           st["noise"][j], cap, key_idx)
+        return h
+
+    pos0 = st["pos"].clone()
+    h0 = st["h"].clone()
+    s = torch.cuda.Stream()
+    s.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(s):
+        for _ in range(2):
+            rollout()
+    st["pos"].copy_(pos0)
+    st["h"].copy_(h0)
+    torch.cuda.current_stream().wait_stream(s)
+    g = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(g):
+        out_h = rollout()
+    st["pos"].copy_(pos0)
+    entry = {"graph": g, "out_h": out_h}
+    _GRAPHS[key] = entry
+    # Evict smaller-cap graphs of the same family: within one run the
+    # capacity only grows (prefill walks forward; decode cap >= final
+    # prefill cap), so their captured private pools are dead weight.
+    fam = (key[0], key[1], key[4], key[5])
+    for k2 in [k for k in _GRAPHS
+               if k != key and (k[0], k[1], k[4], k[5]) == fam
+               and k[3] < cap]:
+        dead = _GRAPHS.pop(k2)["graph"]
+        del dead
+    return entry
+
+
+def _noise_chunks(seed: int, n: int):
+    """The reference's CPU-generator noise stream, as (ceil(n/CHUNK), CHUNK, H)."""
+    g = torch.Generator(device="cpu")
+    g.manual_seed(seed)
+    full = torch.randn(n, HIDDEN, generator=g, dtype=torch.bfloat16)
+    pad = (-n) % CHUNK
+    if pad:
+        full = torch.cat([full, torch.zeros(pad, HIDDEN, dtype=torch.bfloat16)], 0)
+    return full.view(-1, CHUNK, HIDDEN)
+
+
+@torch.no_grad()
+def prefill(model: Model, ctx_len: int, seed: int, device=None):
+    device = device or next(model.parameters()).device
+    model = model.to(device).eval()
+    assert ctx_len <= model.max_seq
+    rt = model._build_runtime(device)
+    st = _statics(model, device)
+    k_caches = [torch.zeros(NUM_KV, model.max_seq, HEAD_DIM, device=device,
+                            dtype=torch.bfloat16) for _ in range(model.num_layers)]
+    v_caches = [torch.zeros_like(t) for t in k_caches]
+    g = torch.Generator(device="cpu")
+    g.manual_seed(seed)
+    h0 = torch.randn(HIDDEN, generator=g, dtype=torch.bfloat16).to(device)
+
+    st["pos"].fill_(0)
+    st["h"].copy_(h0)
+    noise = _noise_chunks(seed + 1, ctx_len)
+    n_chunks = ctx_len // CHUNK
+    tail = ctx_len % CHUNK
+    for c in range(n_chunks):
+        st["noise"].copy_(noise[c])
+        end = (c + 1) * CHUNK
+        cap = _cap_for(end, model.max_seq)
+        entry = _get_graph(model, rt, st, k_caches, v_caches, CHUNK, cap)
+        entry["graph"].replay()
+        st["h"].copy_(entry["out_h"])
+    if tail:
+        st["noise"].copy_(noise[n_chunks])
+        end = n_chunks * CHUNK + tail
+        cap = _cap_for(end, model.max_seq)
+        entry = _get_graph(model, rt, st, k_caches, v_caches, tail, cap)
+        entry["graph"].replay()
+        st["h"].copy_(entry["out_h"])
+    return st["h"].clone(), k_caches, v_caches
+
+
+@torch.no_grad()
+def decode_steps(model: Model, hidden, k_caches, v_caches,
+                 start_pos: int, n_steps: int, seed: int):
+    device = hidden.device
+    if model._rt is None:
+        rt = model._build_runtime(device)
+    else:
+        rt = model._rt
+    st = _statics(model, device)
+    st["pos"].fill_(start_pos)
+    st["h"].copy_(hidden)
+    noise = _noise_chunks(seed + 2, n_steps)
+    end = start_pos + n_steps
+    cap = _cap_for(end, model.max_seq)
+    n_chunks = n_steps // CHUNK
+    tail = n_steps % CHUNK
+    for c in range(n_chunks):
+        st["noise"].copy_(noise[c])
+        entry = _get_graph(model, rt, st, k_caches, v_caches, CHUNK, cap)
+        entry["graph"].replay()
+        st["h"].copy_(entry["out_h"])
+    if tail:
+        st["noise"].copy_(noise[n_chunks])
+        entry = _get_graph(model, rt, st, k_caches, v_caches, tail, cap)
+        entry["graph"].replay()
+        st["h"].copy_(entry["out_h"])
+    return st["h"].clone(), k_caches, v_caches
+
+
+@torch.no_grad()
+def run(ctx_len: int, n_decode: int, seed: int, model: Model | None = None,
+        max_seq: int | None = None) -> dict:
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    max_seq = max_seq or max(ctx_len + n_decode, 512)
+    if model is None:
+        model = Model(NUM_LAYERS, max_seq)
+    else:
+        if getattr(model, "max_seq", 0) < ctx_len + n_decode:
+            raise ValueError(
+                f"model.max_seq={getattr(model, 'max_seq', None)} too small for "
+                f"ctx_len={ctx_len}+n_decode={n_decode}"
+            )
+    model = model.to(device).eval()
+    h, k_caches, v_caches = prefill(model, ctx_len, seed, device=device)
+    h, k_caches, v_caches = decode_steps(
+        model, h, k_caches, v_caches, start_pos=ctx_len, n_steps=n_decode, seed=seed
+    )
+    return {"last_hidden": h.detach(), "ctx_len": ctx_len,
+            "decode_steps": n_decode}
+
+
+def get_init_inputs():
+    return [NUM_LAYERS, 131072]
+
+
+def get_inputs():
+    return []

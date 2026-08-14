@@ -1,0 +1,10 @@
+run_id: qwen38_05_topk_bitonic
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 05_topk_bitonic
+peak_fraction: 0.0028
+
+verdict: clean
+
+summary: "Two-phase sort-free top-k in one CUDA graph in Triton -- per-slice masked-max candidate extraction (tie-safe, one position per round) then a bitonic sort over the row's candidates using reshape/trans/join/split permutations only. No cheat patterns."

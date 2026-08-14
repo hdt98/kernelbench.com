@@ -1,0 +1,137 @@
+"""Causal FlashAttention forward for MI325X -- tiled online-softmax Triton kernel.
+
+Qwen 3.8 (Nexus-hosted) in-session solution for KernelBench-AMD 04_flash_attention.
+
+    q, k, v: (B, H, S, D) bf16 -> o (B, H, S, D) bf16, scores = q @ k.T / sqrt(D),
+    causal mask, fp32 softmax math, never materializing the (S, S) score matrix.
+
+Grid is (B*H) x ceil(S/BM). Each program owns a query block; pid_bh = b*H + h
+indexes heads, and because (B, H, S, D) is contiguous the flat head offset is
+pid_bh * S * D. Each program streams key/value blocks up to its causal horizon
+with online softmax (running max m_i, sum l_i, fp32 accumulator), and writes
+out = acc / l_i. Ragged S tails mask key columns past S and drop query rows
+past S in the store. bf16 probabilities feed the second dot (tolerance is
+5e-2 bf16, matching flash-style rounding). Forward is CUDA-graph-cached on the
+q/k/v pointers.
+"""
+import math
+
+import torch
+import torch.nn as nn
+import triton
+import triton.language as tl
+
+# Annotated constexpr so @triton.jit kernels can read it (Triton 3.1 rejects
+# plain module globals inside kernels).
+NEG_INF: tl.constexpr = float("-inf")
+
+
+@triton.jit
+def _flash_fwd_kernel(q_ptr, k_ptr, v_ptr, o_ptr,
+                      S, scale, stride_h,
+                      D: tl.constexpr, BM: tl.constexpr, BN: tl.constexpr):
+    pid_bh = tl.program_id(0)
+    pid_m = tl.program_id(1)
+
+    # (B, H, S, D) contiguous: offset(b, h) = (b*H + h) * S * D.
+    q_off = pid_bh * stride_h
+    k_off = pid_bh * stride_h
+    v_off = pid_bh * stride_h
+    o_off = pid_bh * stride_h
+
+    rm = pid_m * BM + tl.arange(0, BM)
+    rd = tl.arange(0, D)
+    mmask = rm < S
+
+    q = tl.load(q_ptr + q_off + rm[:, None] * D + rd[None, :],
+                mask=mmask[:, None], other=0.0)
+
+    m_i = tl.full((BM,), NEG_INF, dtype=tl.float32)
+    l_i = tl.zeros((BM,), dtype=tl.float32)
+    acc = tl.zeros((BM, D), dtype=tl.float32)
+
+    hi = tl.minimum((pid_m + 1) * BM, S)
+    for n0 in range(0, hi, BN):
+        rn = n0 + tl.arange(0, BN)
+        nmask = rn < S
+        k = tl.load(k_ptr + k_off + rn[:, None] * D + rd[None, :],
+                    mask=nmask[:, None], other=0.0)
+        qk = tl.dot(q, tl.trans(k)) * scale
+        causal_ok = rn[None, :] <= rm[:, None]
+        valid = causal_ok & nmask[None, :]
+        qk = tl.where(valid, qk, NEG_INF)
+        m_new = tl.maximum(m_i, tl.max(qk, axis=1))
+        alpha = tl.exp(m_i - m_new)
+        p = tl.exp(qk - m_new[:, None])
+        l_i = l_i * alpha + tl.sum(p, axis=1)
+        v = tl.load(v_ptr + v_off + rn[:, None] * D + rd[None, :],
+                    mask=nmask[:, None], other=0.0)
+        acc = acc * alpha[:, None] + tl.dot(p.to(tl.bfloat16), v)
+        m_i = m_new
+
+    out = acc / l_i[:, None]
+    tl.store(o_ptr + o_off + rm[:, None] * D + rd[None, :], out.to(tl.bfloat16),
+             mask=mmask[:, None])
+
+
+class Model(nn.Module):
+    def __init__(self, B: int, H: int, S: int, D: int):
+        super().__init__()
+        self.B, self.H, self.S, self.D = B, H, S, D
+        self.register_buffer("_dummy", torch.zeros(1, dtype=torch.bfloat16))
+        self.scale = 1.0 / math.sqrt(D)
+        self._graph = None
+        self._graph_key = None
+        self._graph_out = None
+
+    def _compute(self, q, k, v):
+        B, H, S, D = self.B, self.H, self.S, self.D
+        o = torch.empty_like(q)
+        BM = 128
+        BN = 64 if D == 128 else 64
+        grid = (B * H, (S + BM - 1) // BM)
+        # stride_h is the PER-HEAD stride S*D (pid_bh = b*H + h is flattened,
+        # and contiguous (B,H,S,D) gives offset(b,h) = pid_bh * S * D).
+        _flash_fwd_kernel[grid](q, k, v, o, S, self.scale, S * D,
+                                D=D, BM=BM, BN=BN,
+                                num_warps=8 if D == 128 else 4)
+        return o
+
+    def forward(self, q, k, v):
+        key = (q.data_ptr(), k.data_ptr(), v.data_ptr(), tuple(q.shape))
+        if self._graph is not None and self._graph_key == key:
+            self._graph.replay()
+            return self._graph_out
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for _ in range(2):
+                out = self._compute(q, k, v)
+        torch.cuda.current_stream().wait_stream(s)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            out = self._compute(q, k, v)
+        self._graph = g
+        self._graph_key = key
+        self._graph_out = out
+        g.replay()
+        return out
+
+
+# Same default shape and input distribution as the reference deck entry
+# (standalone: this problem forbids importing the reference module).
+B = 1
+H = 32
+S = 4096
+D = 128
+
+
+def get_inputs():
+    q = torch.randn(B, H, S, D, dtype=torch.bfloat16)
+    k = torch.randn(B, H, S, D, dtype=torch.bfloat16)
+    v = torch.randn(B, H, S, D, dtype=torch.bfloat16)
+    return [q, k, v]
+
+
+def get_init_inputs():
+    return [B, H, S, D]

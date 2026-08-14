@@ -1,0 +1,10 @@
+run_id: qwen38_03_paged_attention
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 03_paged_attention
+peak_fraction: 0.0492
+
+verdict: clean
+
+summary: "Genuine Triton split-sequence flash decode -- one kernel per (batch, head, CHUNK) chunk with online softmax (running max/sum, fp32 acc) streaming K/V from the packed paged cache through the block table, plus a flash-decode combine kernel; GQA-aware, CUDA-graphed forward. CHUNK tuned 256->64 by sweep (0.0409->0.0492). No cheat patterns."

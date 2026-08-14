@@ -1,0 +1,133 @@
+"""W4A16 weight-only quantized GEMM for MI325X -- fused unpack+dequant+dot.
+
+Qwen 3.8 (Nexus-hosted) in-session solution for KernelBench-AMD 07_w4a16_gemm.
+
+y = x @ dequant(w_q, scales, zeros), x bf16 (M,K), w_q uint8 (K//2, N) with
+the low nibble holding the even-K row and the high nibble the odd-K row,
+scales/zeros bf16 (K//128, N) per K-group.
+
+One kernel, grid over N tiles. Each program streams its weight columns in
+K-chunks of exactly one group (128 = 64 packed bytes), unpacks both nibbles
+into a (128, BN) bf16 tile via join/trans/reshape (row 2i = low nibble = even
+k, row 2i+1 = high nibble = odd k), applies (w - z_g) * s_g, and accumulates
+tl.dot(x_tile, w_deq) in fp32. M < 16 pads the activation tile with zeros
+(dot needs M >= 16); the extra compute is free in this memory-bound regime.
+Group scale/zero rows load once per chunk. Forward is CUDA-graph-cached on
+the input pointer.
+"""
+import torch
+import torch.nn as nn
+import triton
+import triton.language as tl
+
+GROUP = 128
+BK = 128          # one group per k chunk
+BN = 128
+
+
+@triton.jit
+def _w4a16_kernel(x_ptr, wq_ptr, s_ptr, z_ptr, y_ptr,
+                  M, N, K,
+                  BMC: tl.constexpr, BNC: tl.constexpr, BKC: tl.constexpr):
+    pid = tl.program_id(0)
+    rn = pid * BNC + tl.arange(0, BNC)
+    nmask = rn < N
+    rm = tl.arange(0, BMC)
+    mmask = rm < M
+    rk = tl.arange(0, BKC)
+    rkb = tl.arange(0, BKC // 2)
+
+    acc = tl.zeros((BMC, BNC), dtype=tl.float32)
+    n_groups = K // BKC
+    for g in range(n_groups):
+        k0 = g * BKC
+        # packed rows k0/2 .. k0/2 + BKC/2 - 1
+        wmask = nmask[None, :] & ((k0 // 2 + rkb) < (K // 2))[:, None]
+        xb = tl.load(wq_ptr + (k0 // 2 + rkb)[:, None] * N + rn[None, :],
+                     mask=wmask, other=0)
+        lo = (xb & 0xF).to(tl.bfloat16)
+        hi = ((xb >> 4) & 0xF).to(tl.bfloat16)
+        w = tl.reshape(tl.trans(tl.join(lo, hi), 0, 2, 1), (BKC, BNC))
+        s = tl.load(s_ptr + g * N + rn, mask=nmask, other=0.0).to(tl.float32)
+        z = tl.load(z_ptr + g * N + rn, mask=nmask, other=0.0).to(tl.float32)
+        wdeq = (w.to(tl.float32) - z[None, :]) * s[None, :]
+        x = tl.load(x_ptr + rm[:, None] * K + k0 + rk[None, :],
+                    mask=mmask[:, None], other=0.0)
+        acc = tl.dot(x, wdeq.to(tl.bfloat16), acc)
+
+    y = acc.to(tl.bfloat16)
+    tl.store(y_ptr + rm[:, None] * N + rn[None, :], y, mask=mmask[:, None] & nmask[None, :])
+
+
+class Model(nn.Module):
+    def __init__(self, M: int, N: int, K: int, group_size: int = GROUP):
+        super().__init__()
+        assert K % group_size == 0
+        assert K % 2 == 0
+        self.M, self.N, self.K = M, N, K
+        self.group_size = group_size
+        n_groups = K // group_size
+        torch.manual_seed(0xC0DE ^ (M * 1315423911 + N * 2654435761 + K))
+        w_full = torch.randn(K, N, dtype=torch.float32) * 0.02
+        w_g = w_full.view(n_groups, group_size, N)
+        w_min = w_g.min(dim=1, keepdim=True).values
+        w_max = w_g.max(dim=1, keepdim=True).values
+        scales = (w_max - w_min).clamp_min(1e-8) / 15.0
+        zeros = (-w_min / scales).round().clamp(0, 15)
+        w_q = ((w_g / scales) + zeros).round().clamp(0, 15).to(torch.uint8)
+        w_q = w_q.view(K, N)
+        lo = w_q[0::2].to(torch.uint8) & 0xF
+        hi = w_q[1::2].to(torch.uint8) & 0xF
+        w_packed = (lo | (hi << 4)).contiguous()
+        self.register_buffer("w_q", w_packed)
+        self.register_buffer("scales", scales.squeeze(1).to(torch.bfloat16))
+        self.register_buffer("zeros", zeros.squeeze(1).to(torch.bfloat16))
+        self._graph = None
+        self._graph_key = None
+        self._graph_out = None
+
+    def _compute(self, x):
+        M, N, K = self.M, self.N, self.K
+        bm = max(16, 1 << (M - 1).bit_length())
+        y = torch.empty(M, N, dtype=torch.bfloat16, device=x.device)
+        grid = ((N + BN - 1) // BN,)
+        _w4a16_kernel[grid](x, self.w_q, self.scales, self.zeros, y,
+                            M, N, K, BMC=bm, BNC=BN, BKC=BK, num_warps=8,
+                            num_stages=1)
+        return y
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        key = (x.data_ptr(), tuple(x.shape))
+        if self._graph is not None and self._graph_key == key:
+            self._graph.replay()
+            return self._graph_out
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for _ in range(2):
+                out = self._compute(x)
+        torch.cuda.current_stream().wait_stream(s)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            out = self._compute(x)
+        self._graph = g
+        self._graph_key = key
+        self._graph_out = out
+        g.replay()
+        return out
+
+
+# Same default shape and input distribution as the reference deck entry
+# (standalone shim; the reference module is not imported).
+M = 1
+N = 12288
+K = 4096
+
+
+def get_inputs():
+    x = torch.randn(M, K, dtype=torch.bfloat16)
+    return [x]
+
+
+def get_init_inputs():
+    return [M, N, K]
