@@ -20,13 +20,6 @@ function modelGeomean(
   return Math.exp(peaks.reduce((s, v) => s + Math.log(v), 0) / peaks.length)
 }
 
-const GPU_DESCRIPTIONS: Record<string, string> = {
-  mi325x:
-    "The MI325X is based on gfx942 (CDNA 3) with 288 GB HBM3e and 8 TB/s peak bandwidth. Kernels use Triton on ROCm and PyTorch HIP backends.",
-  mi350x:
-    "The MI350X is based on gfx950 (CDNA 4) with 288 GB HBM3e and 8 TB/s peak bandwidth. Kernels use Triton on ROCm and PyTorch HIP backends.",
-}
-
 export function AmdGpuDashboard({
   dashboards,
   gpus,
@@ -58,14 +51,12 @@ export function AmdGpuDashboard({
     (a, b) => modelGeomean(b.results, leaderboard.problems) - modelGeomean(a.results, leaderboard.problems),
   )
 
-  const gpuDesc = GPU_DESCRIPTIONS[active] ?? GPU_DESCRIPTIONS.mi325x
-
   return (
     <div className="space-y-8">
       <section className="hero-section" id="amd">
         <h1 className="hero-title">Nexus KernelBench</h1>
         <p className="hero-subtitle">
-          GPU kernel benchmark on {leaderboard.hardware.name} ({leaderboard.hardware.sm}).
+          GPU kernel benchmark on AMD Instinct GPUs.
           Genuine Triton and HIP kernels — no reward hacking.
         </p>
         <div className="hero-stats">
@@ -224,8 +215,8 @@ export function AmdGpuDashboard({
             <p>Performance is measured by benchmark.py using median timing over multiple trials (problem-dependent). The peak fraction is the ratio of achieved TFLOPS (or GBPS for memory-bound problems) to the hardware peak.</p>
           </div>
           <div className="methodology-card">
-            <h3>{leaderboard.hardware.name}</h3>
-            <p>{gpuDesc}</p>
+            <h3>AMD Instinct GPUs</h3>
+            <p>Benchmarks run on AMD Instinct MI325X (gfx942, CDNA 3) and MI350X (gfx950, CDNA 4), both with 288 GB HBM3e and 8 TB/s peak bandwidth. Kernels use Triton on ROCm and PyTorch HIP backends.</p>
           </div>
         </div>
       </section>
@@ -255,4 +246,3 @@ export function AmdGpuDashboard({
     </div>
   )
 }
-

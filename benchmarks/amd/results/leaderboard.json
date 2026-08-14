@@ -25,7 +25,7 @@
   ],
   "models": [
     {
-      "label": "Codex (GLM-5.2)",
+      "label": "GLM 5.2 (Nexus-hosted)",
       "harness": "codex",
       "model": "glm-5.2",
       "effort": "xhigh",
