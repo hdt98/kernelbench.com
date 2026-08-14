@@ -292,7 +292,9 @@
           "retryable_infra_failure": false,
           "solution_url": "/runs/qwen38_07_w4a16_gemm_v2_solution.py.txt"
         }
-      }
+      },
+      "pass_count": 14,
+      "total_runs": 14
     }
   ],
   "per_problem": {
