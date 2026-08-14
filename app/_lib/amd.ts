@@ -18,7 +18,7 @@ const AMD_PROBLEM_COPY: Record<string, { description: string; approach: string }
   },
   "01_glm52_fused_moe": {
     description: "GLM-5.2 fused MoE layer with 256 routed experts, top-8 routing, 1 shared expert, SwiGLU activation.",
-    approach: "PyTorch MoE (mem-efficient)",
+    approach: "HIP fused MoE kernel",
   },
   "02_kda_cutlass": {
     description: "Kimi Delta Attention (chunk forward). Linear attention with delta decay.",
@@ -26,7 +26,7 @@ const AMD_PROBLEM_COPY: Record<string, { description: string; approach: string }
   },
   "02_deepseek_nsa": {
     description: "DeepSeek-style Native Sparse Attention with block selection and sliding window.",
-    approach: "Vectorized PyTorch NSA",
+    approach: "HIP sparse attention kernel",
   },
   "02_segmented_decay_scan": {
     description: "Segmented exponential-decay scan with per-token episode resets. Associative recurrence.",
@@ -34,7 +34,7 @@ const AMD_PROBLEM_COPY: Record<string, { description: string; approach: string }
   },
   "03_megaqwen_decode": {
     description: "MegaQwen-style Qwen3-0.6B block decode. Multi-layer transformer with KV cache.",
-    approach: "Eager PyTorch",
+    approach: "HIP decode kernel",
   },
   "03_paged_attention": {
     description: "Paged attention decode with block-table KV cache layout. Single-query attention.",
@@ -58,7 +58,7 @@ const AMD_PROBLEM_COPY: Record<string, { description: string; approach: string }
   },
   "06_sonic_moe_swiglu": {
     description: "Sonic-MoE up-projection: grouped GEMM + fused SwiGLU activation.",
-    approach: "torch.mm + F.silu",
+    approach: "Triton grouped GEMM + SwiGLU kernel",
   },
   "07_w4a16_gemm": {
     description: "W4A16 weight-only quantized GEMM. INT4 weight dequant + BF16 GEMV.",
