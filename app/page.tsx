@@ -85,7 +85,7 @@ export default async function HomePage() {
         <div className="bar-chart">
           {passingRows.map((row) => {
             const frac = row.bestPeakFraction ?? 0
-            const barWidth = Math.max(frac * 1000, 1)
+            const barWidth = Math.max(frac * 100, 1)
             return (
               <div key={row.slug} className="bar-row">
                 <a href={"/problems/" + row.slug} className="bar-label">{row.displayName}</a>
