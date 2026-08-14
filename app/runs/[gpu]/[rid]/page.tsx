@@ -24,7 +24,9 @@ export const dynamicParams = true
 const GPU_NAMES: Record<string, string> = {
   rtxpro6000: "RTX PRO 6000",
   h100: "H100",
-  b200: "B200", mi325x: "AMD MI325X",
+  b200: "B200",
+  mi325x: "AMD MI325X",
+  mi350x: "AMD MI350X",
 }
 
 interface ShapeRow {

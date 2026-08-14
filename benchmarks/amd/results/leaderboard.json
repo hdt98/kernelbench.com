@@ -25,7 +25,7 @@
   ],
   "models": [
     {
-      "label": "Codex (GLM-5.2)",
+      "label": "GLM 5.2 (Nexus-hosted)",
       "harness": "codex",
       "model": "glm-5.2",
       "effort": "xhigh",
@@ -142,7 +142,7 @@
           "run_id": "manual_flash_attn",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.128,
+          "peak_fraction": 0.1359,
           "failure_reason": null,
           "retryable_infra_failure": false,
           "solution_url": "/runs/manual_flash_attn_solution.py.txt"

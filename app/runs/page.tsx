@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import Link from "next/link"
 import { loadLeaderboard } from "@/app/_lib/data"
+import { AMD_GPUS } from "@/app/_lib/amd"
 import { PageHead } from "@/app/_components/page-head"
 
 // Solution source code lives in the GitHub repo; the site links each run
@@ -15,6 +16,7 @@ function traceUrl(runId: string): string {
 
 type RunRow = {
   run_id: string
+  gpu: string
   problem: string
   harness: string
   model: string
@@ -33,7 +35,6 @@ type RunsIndexProps = {
 }
 
 async function loadAllRuns(): Promise<RunRow[]> {
-  const lb = await loadLeaderboard()
   const solutionEntries = new Set<string>()
   try {
     const entries = await readdir(join(process.cwd(), "public/runs"))
@@ -46,21 +47,29 @@ async function loadAllRuns(): Promise<RunRow[]> {
   }
 
   const out: RunRow[] = []
-  for (const m of lb.models) {
-    for (const [problem, cell] of Object.entries(m.results)) {
-      // AMD: show all runs from leaderboard, not just those with solution files in public/runs
-      out.push({
-        run_id: cell.run_id,
-        problem,
-        harness: m.harness,
-        model: m.model,
-        effort: m.effort,
-        correct: cell.correct,
-        has_solution: cell.has_solution,
-        failure_reason: cell.failure_reason ?? null,
-        peak_fraction: cell.peak_fraction,
-        elapsed_seconds: cell.elapsed_seconds ?? null,
-      })
+  for (const gpuConfig of AMD_GPUS) {
+    let lb
+    try {
+      lb = await loadLeaderboard(gpuConfig.leaderboardFile)
+    } catch {
+      continue
+    }
+    for (const m of lb.models) {
+      for (const [problem, cell] of Object.entries(m.results)) {
+        out.push({
+          run_id: cell.run_id,
+          gpu: gpuConfig.key,
+          problem,
+          harness: m.harness,
+          model: m.model,
+          effort: m.effort,
+          correct: cell.correct,
+          has_solution: cell.has_solution,
+          failure_reason: cell.failure_reason ?? null,
+          peak_fraction: cell.peak_fraction,
+          elapsed_seconds: cell.elapsed_seconds ?? null,
+        })
+      }
     }
   }
   // Sort by scored peak_fraction desc, with correctness-only no-perf rows before FAIL/ERR.
@@ -176,6 +185,7 @@ export default async function RunsIndex({ searchParams }: RunsIndexProps) {
           <thead>
             <tr>
               <th>peak</th>
+              <th>gpu</th>
               <th>problem</th>
               <th>model</th>
               <th>harness</th>
@@ -187,9 +197,10 @@ export default async function RunsIndex({ searchParams }: RunsIndexProps) {
             {runs.map((r) => (
               <tr key={r.run_id}>
                 <td className="text-right pr-4">{statusCell(r)}</td>
+                <td className="text-[var(--color-fg-muted)] whitespace-nowrap text-[10px]">{r.gpu}</td>
                 <td className="text-[var(--color-fg)] whitespace-nowrap">
                   <Link
-                    href={"/runs/mi325x/" + r.run_id}
+                    href={"/runs/" + r.gpu + "/" + r.run_id}
                     className="no-underline hover:text-[var(--color-accent)]"
                   >
                     {r.problem}
@@ -197,7 +208,7 @@ export default async function RunsIndex({ searchParams }: RunsIndexProps) {
                 </td>
                 <td className="text-[var(--color-fg-bright)] whitespace-nowrap">
                   <Link
-                    href={"/runs/mi325x/" + r.run_id}
+                    href={"/runs/" + r.gpu + "/" + r.run_id}
                     className="no-underline hover:text-[var(--color-accent)]"
                   >
                     {shortModel(r.harness, r.model, r.effort)}
@@ -213,7 +224,7 @@ export default async function RunsIndex({ searchParams }: RunsIndexProps) {
                 </td>
                 <td className="text-[var(--color-fg-muted)] text-[10px]">
                   <Link
-                    href={"/runs/mi325x/" + r.run_id}
+                    href={"/runs/" + r.gpu + "/" + r.run_id}
                     className="no-underline hover:text-[var(--color-accent)] text-[10px]"
                   >
                     {r.run_id}

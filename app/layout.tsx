@@ -20,7 +20,7 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://nexuskernel.com"),
   title: "nexuskernel.com: AMD GPU Kernel Benchmark Results",
   description:
-    "AMD Instinct GPU kernel benchmark results on MI325X (gfx942). Genuine Triton and HIP kernels.",
+    "AMD Instinct GPU kernel benchmark results on MI325X and MI350X. Genuine Triton and HIP kernels.",
   authors: [{ name: "One Mount Group", url: "https://onenexus-do.cloud" }],
   creator: "One Mount Group",
   publisher: "nexuskernel.com",
@@ -36,7 +36,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "nexuskernel.com: AMD GPU Kernel Benchmark Results",
     description:
-      "AMD Instinct GPU kernel benchmark results on MI325X (gfx942). Genuine Triton and HIP kernels.",
+      "AMD Instinct GPU kernel benchmark results on MI325X and MI350X. Genuine Triton and HIP kernels.",
     url: "https://nexuskernel.com",
     siteName: "nexuskernel.com",
   },

@@ -5,11 +5,14 @@ import { problemLabel } from "./models"
 
 const AMD_ROOT = join(process.cwd(), "benchmarks/amd")
 const AMD_PROBLEMS_ROOT = join(AMD_ROOT, "problems")
-const AMD_LEADERBOARD = "benchmarks/amd/results/leaderboard.json"
+export const AMD_GPUS: { key: string; label: string; leaderboardFile: string }[] = [
+  { key: "mi325x", label: "AMD MI325X", leaderboardFile: "benchmarks/amd/results/leaderboard.json" },
+  { key: "mi350x", label: "AMD MI350X", leaderboardFile: "benchmarks/amd/results/leaderboard_mi350x.json" },
+]
 
 const AMD_PROBLEM_COPY: Record<string, { description: string; approach: string }> = {
   "01_fp8_gemm": {
-    description: "FP8 matrix multiplication using OCP e4m3 format, targeting MFMA units on gfx942.",
+    description: "FP8 matrix multiplication using OCP e4m3 format, targeting MFMA units on AMD Instinct GPUs.",
     approach: "Triton FP8 + MFMA hybrid",
   },
   "01_dequant_gemv": {
@@ -120,6 +123,12 @@ export interface AmdProblemRow {
 export interface AmdDashboard {
   leaderboard: Leaderboard
   metas: Map<string, AmdProblemMeta>
+  rows: AmdProblemRow[]
+}
+
+export interface AmdDashboardData {
+  gpu: string
+  leaderboard: Leaderboard
   rows: AmdProblemRow[]
 }
 
@@ -277,7 +286,7 @@ async function loadProblemMeta(slug: string): Promise<AmdProblemMeta> {
 }
 
 export async function loadAmdLeaderboard(): Promise<Leaderboard> {
-  return loadLeaderboard(AMD_LEADERBOARD)
+  return loadLeaderboard("benchmarks/amd/results/leaderboard.json")
 }
 
 export async function loadAmdProblemMetas(): Promise<Map<string, AmdProblemMeta>> {
@@ -329,9 +338,8 @@ function summarizeProblem(leaderboard: Leaderboard, slug: string) {
   return { attempts, passed, bestModelId, bestCell }
 }
 
-export async function loadAmdDashboard(): Promise<AmdDashboard> {
-  const [leaderboard, metas] = await Promise.all([loadAmdLeaderboard(), loadAmdProblemMetas()])
-  const rows = leaderboard.problems.map((slug) => {
+function buildAmdRows(leaderboard: Leaderboard, metas: Map<string, AmdProblemMeta>): AmdProblemRow[] {
+  return leaderboard.problems.map((slug) => {
     const meta = metas.get(slug) ?? parseAmdProblemYaml(slug, "")
     const summary = summarizeProblem(leaderboard, slug)
     const bestModel = bestModelLabel(leaderboard, summary.bestModelId)
@@ -361,5 +369,23 @@ export async function loadAmdDashboard(): Promise<AmdDashboard> {
       meta,
     } satisfies AmdProblemRow
   })
+}
+
+export async function loadAmdDashboard(): Promise<AmdDashboard> {
+  const [leaderboard, metas] = await Promise.all([loadAmdLeaderboard(), loadAmdProblemMetas()])
+  const rows = buildAmdRows(leaderboard, metas)
   return { leaderboard, metas, rows }
+}
+
+export async function loadAmdDashboardForGpu(gpu: string): Promise<AmdDashboardData> {
+  const config = AMD_GPUS.find((g) => g.key === gpu) ?? AMD_GPUS[0]
+  const leaderboard = await loadLeaderboard(config.leaderboardFile)
+  const metas = await loadAmdProblemMetas()
+  const rows = buildAmdRows(leaderboard, metas)
+  return { gpu: config.key, leaderboard, rows }
+}
+
+export async function loadAllAmdDashboards(): Promise<Record<string, AmdDashboardData>> {
+  const entries = await Promise.all(AMD_GPUS.map((g) => loadAmdDashboardForGpu(g.key)))
+  return Object.fromEntries(entries.map((d) => [d.gpu, d]))
 }
