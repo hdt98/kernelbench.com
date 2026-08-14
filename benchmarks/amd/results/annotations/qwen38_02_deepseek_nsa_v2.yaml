@@ -1,0 +1,10 @@
+run_id: qwen38_02_deepseek_nsa_v2
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 02_deepseek_nsa
+peak_fraction: 0.0438
+
+verdict: clean
+
+summary: "v2 supersedes the v1 torch-only cell. Genuine Triton NSA pipeline faithful to the reference semantics (dense block-importance scoring, top-8 causal blocks unioned with the 64-token sliding window, softmax over selected keys): k0 computes per-block key means and intra-block prefix means via tl.cumsum; k1a scores imp = Q@KM^T in fp32 with the diagonal block column replaced by q.PM[t] and future/padding blocks masked; k1b runs 8 masked-argmax selection rounds into an int8 selection matrix; k2 is block-aligned (BN=64=block_size) causal flash attention with online softmax, bf16 tensor-core dots, per-row sel|window block mask. Disclosed tie-break: argmax resolves exact importance ties toward the lowest block index where the reference's tuple sort resolves to the highest -- measure zero on the deck's random inputs, check.py passes all seeds. Triton 3.1 on gfx942 miscompiles the >=3-iteration unrolled selection loop (segfault, verified by staged per-kernel isolation: 1-2 iterations pass, 3+ dump core), so this file carries both selection forms behind an import-time triton-version gate; on this board (triton 3.1.0) the loop-free round-launch form runs. Same file as the MI350X v2 cell (md5 b87e47be). check.py PASS (fresh seeds + numeric stress). No cheat patterns."

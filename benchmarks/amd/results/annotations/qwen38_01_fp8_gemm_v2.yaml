@@ -1,0 +1,10 @@
+run_id: qwen38_01_fp8_gemm_v2
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 01_fp8_gemm
+peak_fraction: 0.0674
+
+verdict: clean
+
+summary: "v2 supersedes the v1 cell. Genuine pure-Triton fp8 e4m3 GEMM (e4m3fn->e4m3fnuz bitcast with the x4 accumulator correction, CUDA-graphed forward) with two upgrades over v1: (a) the main kernel autotune list grows to 16 configs (num_stages 2/3 pipelining, BK=256, warps-16 tiles); (b) a dedicated Triton split-K path for the skinny M=32 shape (fp32 partials per K slice, reduced by a second kernel that also applies the per-channel weight scale), lifting that shape from 0.0051 to ~0.02 (260 -> ~1000 GB/s). Official geomean 0.0674 (shapes 0.0994/0.0878/0.0197/0.1200) vs v1 0.0495 -- still below the GLM cell (0.1075), whose solution adds a raw-HIP MFMA skinny-M path; closing that gap is next-round work. Note on evidence: an earlier check pass reported framework=hip_raw because leftover .hip sidecar files from previous sessions sat in the problem dir; they were moved aside and check.py rerun -- final rocm_language evidence is triton (triton_jit/triton_import/triton_tl), the solution.py itself contains no HIP code. check.py PASS (fresh seeds + numeric stress). RESULT: LOW is the bench's informational geomean<0.1 marker, not a correctness failure. No cheat patterns."

@@ -1,0 +1,214 @@
+"""Paged attention decode (gfx942/gfx950) -- GQA-fused split-seq Triton flash decode.
+
+Qwen 3.8 (Nexus-hosted) in-session solution for KernelBench-AMD 03_paged_attention.
+
+v2: the split-decode kernel now fuses the whole GQA group into one program.
+Every query head in a group streams the same K/V pages, so kernel A assigns
+one program per (batch, kv_head, chunk): K/V for the chunk is loaded ONCE and
+reused across all G query heads (q@K^T and p@V as tl.dot with fp32 accumulate,
+softmax weights rounded to bf16 for the tensor-core p@V). This cuts dominant
+DRAM traffic by the group factor (4x-8x on the deck shapes) vs the per-head
+kernel. Combine kernel unchanged: flash-decode reduce across chunk partials
+(global max, rescaled sum, bf16 output).
+
+GQA: group G = H // Hkv; head h = kvh*G + g. Empty chunks (past per-batch
+seq_len) emit neutral partials (m=-inf, l=0, acc=0). Forward is CUDA-graph-
+cached on the input pointers so the timed region is pure GPU work; new input
+pointers (correctness seeds) recapture.
+"""
+import math
+
+import torch
+import torch.nn as nn
+import triton
+import triton.language as tl
+
+CHUNK = 64
+NUM_WARPS = 4
+# Call-form constexpr: plain module globals are rejected inside kernels by
+# Triton 3.7 (ROCm 7 / gfx950 nodes); call-form works on 3.1 too.
+NEG_INF = tl.constexpr(float("-inf"))
+
+
+def _next_pow2(x: int) -> int:
+    return 1 << (x - 1).bit_length()
+
+
+@triton.jit
+def _attn_partial(
+    q_ptr, kv_ptr, bt_ptr, sl_ptr,
+    acc_ptr, m_ptr, l_ptr,
+    H, Hkv, D: tl.constexpr, PAGE: tl.constexpr,
+    max_blocks, nchunks, CHUNK_C: tl.constexpr,
+    scale, GN: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    b = pid // (Hkv * nchunks)
+    rem = pid % (Hkv * nchunks)
+    kvh = rem // nchunks
+    c = rem % nchunks
+
+    G = H // Hkv
+    rg = tl.arange(0, GN)
+    rd = tl.arange(0, D)
+    rp = tl.arange(0, PAGE)
+    gmask = rg < G
+    offs_h = b * H + kvh * G + rg  # heads of this group (masked rows may exceed H)
+
+    seq_len = tl.load(sl_ptr + b)
+    start = c * CHUNK_C
+    if start >= seq_len:
+        # Empty chunk: neutral partials for every head of the group.
+        tl.store(acc_ptr + (offs_h[:, None] * nchunks + c) * D + rd[None, :],
+                 tl.zeros((GN, D), dtype=tl.float32), mask=gmask[:, None])
+        tl.store(m_ptr + offs_h * nchunks + c, tl.full((GN,), float("-inf"), tl.float32),
+                 mask=gmask)
+        tl.store(l_ptr + offs_h * nchunks + c, tl.zeros((GN,), tl.float32), mask=gmask)
+        return
+
+    q = tl.load(q_ptr + offs_h[:, None] * D + rd[None, :], mask=gmask[:, None], other=0.0)
+
+    end = tl.minimum(start + CHUNK_C, seq_len)
+    m_i = tl.full((GN,), float("-inf"), tl.float32)
+    l_i = tl.zeros((GN,), tl.float32)
+    acc = tl.zeros((GN, D), tl.float32)
+
+    pages_per_chunk: tl.constexpr = CHUNK_C // PAGE
+    for pp in range(pages_per_chunk):
+        tok0 = start + pp * PAGE
+        if tok0 < end:
+            page_idx = tok0 // PAGE
+            block = tl.load(bt_ptr + b * max_blocks + page_idx)
+            # kv_cache: (num_blocks, PAGE, Hkv, 2D); K at offset 0, V at offset D.
+            base = kv_ptr + ((block * PAGE + rp[:, None]) * Hkv + kvh) * (2 * D)
+            tmask = tok0 + rp < end
+            k = tl.load(base + rd[None, :], mask=tmask[:, None], other=0.0)
+            v = tl.load(base + D + rd[None, :], mask=tmask[:, None], other=0.0)
+            qk = tl.dot(q, tl.trans(k)) * scale  # (GN, PAGE) fp32
+            qk = tl.where(tmask[None, :], qk, float("-inf"))
+            qk = tl.where(gmask[:, None], qk, float("-inf"))
+            m_new = tl.maximum(m_i, tl.max(qk, axis=1))
+            # All-inf only happens on masked group rows; sanitize to keep
+            # exp(inf - inf) from producing NaN registers (stores stay masked).
+            m_safe = tl.where(m_new == float("-inf"), 0.0, m_new)
+            alpha = tl.exp(m_i - m_safe)
+            p = tl.exp(qk - m_safe[:, None])
+            l_i = l_i * alpha + tl.sum(p, axis=1)
+            acc = acc * alpha[:, None] + tl.dot(p.to(tl.bfloat16), v)
+            m_i = m_safe
+
+    tl.store(acc_ptr + (offs_h[:, None] * nchunks + c) * D + rd[None, :], acc,
+             mask=gmask[:, None])
+    tl.store(m_ptr + offs_h * nchunks + c, m_i, mask=gmask)
+    tl.store(l_ptr + offs_h * nchunks + c, l_i, mask=gmask)
+
+
+@triton.jit
+def _attn_combine(acc_ptr, m_ptr, l_ptr, o_ptr, nchunks, D: tl.constexpr, CN: tl.constexpr):
+    pid = tl.program_id(0)  # b*H + h
+    rc = tl.arange(0, CN)
+    rd = tl.arange(0, D)
+    cmask = rc < nchunks
+    m = tl.load(m_ptr + pid * nchunks + rc, mask=cmask, other=float("-inf"))
+    l = tl.load(l_ptr + pid * nchunks + rc, mask=cmask, other=0.0)
+    m_g = tl.max(m, axis=0)
+    w = tl.exp(m - m_g)
+    w = tl.where(cmask, w, 0.0)
+    l_g = tl.sum(l * w, axis=0)
+    a = tl.load(acc_ptr + (pid * nchunks + rc)[:, None] * D + rd[None, :],
+                mask=cmask[:, None], other=0.0)
+    out = tl.sum(a * w[:, None], axis=0) / l_g
+    tl.store(o_ptr + pid * D + rd, out.to(tl.bfloat16))
+
+
+class Model(nn.Module):
+    def __init__(self, batch, num_heads, num_kv_heads, head_dim, seq_len, page_size):
+        super().__init__()
+        assert num_heads % num_kv_heads == 0
+        self.batch = batch
+        self.num_heads = num_heads
+        self.num_kv_heads = num_kv_heads
+        self.head_dim = head_dim
+        self.seq_len = seq_len
+        self.page_size = page_size
+        self.group_size = num_heads // num_kv_heads
+        self.scale = 1.0 / math.sqrt(head_dim)
+        self.register_buffer("_dummy", torch.zeros(1, dtype=torch.bfloat16), persistent=False)
+        assert CHUNK % page_size == 0
+        self._nchunks = (seq_len + CHUNK - 1) // CHUNK
+        # tl.dot needs M >= 16; pad small groups (G<=16 in this deck) to 16 --
+        # the extra masked rows cost tensor-core flops but no DRAM traffic,
+        # and this kernel is bandwidth-bound.
+        self._gn = max(16, _next_pow2(self.group_size))
+        self._graph = None
+        self._graph_key = None
+        self._graph_out = None
+
+    def _compute(self, query, kv_cache, block_table, seq_lens):
+        B, H, D = self.batch, self.num_heads, self.head_dim
+        Hkv = self.num_kv_heads
+        nc = self._nchunks
+        dev = query.device
+        acc = torch.empty(B * H * nc * D, dtype=torch.float32, device=dev)
+        m = torch.empty(B * H * nc, dtype=torch.float32, device=dev)
+        l = torch.empty(B * H * nc, dtype=torch.float32, device=dev)
+        max_blocks = block_table.shape[1]
+        _attn_partial[(B * Hkv * nc,)](
+            query, kv_cache, block_table, seq_lens, acc, m, l,
+            H, Hkv, D=D, PAGE=self.page_size,
+            max_blocks=max_blocks, nchunks=nc, CHUNK_C=CHUNK,
+            scale=self.scale, GN=self._gn,
+            num_warps=NUM_WARPS,
+        )
+        out = torch.empty(B, H, D, dtype=torch.bfloat16, device=dev)
+        cn = _next_pow2(nc)
+        _attn_combine[(B * H,)](acc, m, l, out, nc, D=D, CN=cn, num_warps=4)
+        return out
+
+    def forward(self, query, kv_cache, block_table, seq_lens):
+        key = (query.data_ptr(), kv_cache.data_ptr(), block_table.data_ptr(),
+               seq_lens.data_ptr(), tuple(query.shape))
+        if self._graph is not None and self._graph_key == key:
+            self._graph.replay()
+            return self._graph_out
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for _ in range(2):
+                out = self._compute(query, kv_cache, block_table, seq_lens)
+        torch.cuda.current_stream().wait_stream(s)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            out = self._compute(query, kv_cache, block_table, seq_lens)
+        self._graph = g
+        self._graph_key = key
+        self._graph_out = out
+        g.replay()
+        return out
+
+
+# Same default shape and input distribution as the reference deck entry
+# (standalone shim; the reference module is not imported).
+BATCH = 8
+NUM_HEADS = 32
+NUM_KV_HEADS = 8
+HEAD_DIM = 128
+SEQ_LEN = 1024
+PAGE_SIZE = 16
+
+
+def get_inputs():
+    B, H, Hkv, D, L, P = (BATCH, NUM_HEADS, NUM_KV_HEADS, HEAD_DIM,
+                          SEQ_LEN, PAGE_SIZE)
+    pages_per_seq = (L + P - 1) // P
+    total_pages = max(B * pages_per_seq + 8, 64)
+    query = torch.randn(B, H, D, dtype=torch.bfloat16) * 0.1
+    kv_cache = torch.randn(total_pages, P, Hkv, 2 * D, dtype=torch.bfloat16) * 0.1
+    perm = torch.randperm(total_pages)[: B * pages_per_seq].reshape(B, pages_per_seq).int()
+    block_table = perm.contiguous()
+    seq_lens = torch.full((B,), L, dtype=torch.int32)
+    return [query, kv_cache, block_table, seq_lens]
+
+
+def get_init_inputs():
+    return [BATCH, NUM_HEADS, NUM_KV_HEADS, HEAD_DIM, SEQ_LEN, PAGE_SIZE]

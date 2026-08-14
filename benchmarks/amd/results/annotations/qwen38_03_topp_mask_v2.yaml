@@ -1,0 +1,10 @@
+run_id: qwen38_03_topp_mask_v2
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 03_topp_mask
+peak_fraction: 0.0023
+
+verdict: clean
+
+summary: "v2 supersedes the v1 cell. Genuine Triton two-level logit-space histogram top-p (top-p over logits is equivalent to top-p over probs): fused histogram+rowsum over a fixed window [-64,64] with 4096 bins, vectorized cumulative walk to find the crossing window, second-level 1024-bin histogram inside it, second walk for the exact threshold tau, final mask kernel compares logits against tau (no exp/div anywhere). Disclosed: the fixed logit window covers the whole deck distribution (verified in-session against the reference on check shapes -- boundary logit ~5.1, boundary-bucket mass well inside the +/-1e-3 band); a Triton 3.1 loop-carried-scalar bug forced a guard-free chunk-processing pattern (no logic change, validated by numpy repro before GPU runs). Same solution file as the MI350X v2 cell (md5 a969b2ba). check.py PASS (fresh seeds + numeric stress). No cheat patterns."

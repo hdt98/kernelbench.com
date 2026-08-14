@@ -1,0 +1,10 @@
+run_id: qwen38_03_paged_attention_v2
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 03_paged_attention
+peak_fraction: 0.1278
+
+verdict: clean
+
+summary: "v2 supersedes the v1 cell. Genuine Triton GQA-fused split-decode flash attention: one program per (batch, kv_head, chunk) streams K/V from the packed paged cache through the block table once for the whole query-head group (4-8x less DRAM traffic than v1's per-query-head chunk kernels), tl.dot QK^T and PV with fp32 online softmax, group dim padded to >=16 for tl.dot, combine kernel over chunks; CUDA-graphed forward. CHUNK=64/warps=4 won an in-session sweep. Same solution file as the audited MI350X v2 cell (md5 c8e70cb8). check.py PASS (fresh seeds + numeric stress). No cheat patterns."
