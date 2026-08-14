@@ -299,28 +299,49 @@ function bestModelLabel(leaderboard: Leaderboard, modelId: string | null): strin
   return found?.label ?? modelId
 }
 
+function summarizeProblem(leaderboard: Leaderboard, slug: string) {
+  let attempts = 0
+  let passed = 0
+  let bestModelId: string | null = null
+  let bestCell: (typeof leaderboard.models)[number]["results"][string] | null = null
+
+  for (const model of leaderboard.models) {
+    const cell = model.results?.[slug]
+    if (!cell) continue
+    attempts += 1
+    if (!cell.correct) continue
+    passed += 1
+
+    if (bestCell == null) {
+      bestCell = cell
+      bestModelId = model.model
+      continue
+    }
+
+    const bestPeak = bestCell.peak_fraction
+    const currentPeak = cell.peak_fraction
+    if (currentPeak != null && (bestPeak == null || currentPeak > bestPeak)) {
+      bestCell = cell
+      bestModelId = model.model
+    }
+  }
+
+  return { attempts, passed, bestModelId, bestCell }
+}
+
 export async function loadAmdDashboard(): Promise<AmdDashboard> {
   const [leaderboard, metas] = await Promise.all([loadAmdLeaderboard(), loadAmdProblemMetas()])
   const rows = leaderboard.problems.map((slug) => {
     const meta = metas.get(slug) ?? parseAmdProblemYaml(slug, "")
-    const stats = leaderboard.per_problem[slug] ?? {
-      n_attempted: 0,
-      n_passed: 0,
-      best_peak_fraction: null,
-      best_model: null,
-      ranked_passes: [],
-    }
-    const bestModel = bestModelLabel(leaderboard, stats.best_model)
-    const bestCell = stats.best_model
-      ? leaderboard.models.find((m) => m.model === stats.best_model)?.results?.[slug] ?? null
-      : null
-    const solutionType = bestCell
-      ? bestCell.has_solution
-        ? bestCell.correct === true
+    const summary = summarizeProblem(leaderboard, slug)
+    const bestModel = bestModelLabel(leaderboard, summary.bestModelId)
+    const solutionType = summary.bestCell
+      ? summary.bestCell.has_solution
+        ? summary.bestCell.correct === true
           ? "Triton / HIP kernel"
           : "Written (unverified)"
         : "Not attempted"
-      : stats.n_attempted > 0
+      : summary.attempts > 0
         ? "Written (unverified)"
         : "Not attempted"
     return {
@@ -329,13 +350,13 @@ export async function loadAmdDashboard(): Promise<AmdDashboard> {
       displayName: meta.displayName,
       precision: meta.precision,
       regime: meta.regime,
-      status: stats.n_passed > 0 ? "PASS" : stats.n_attempted > 0 ? "PENDING" : "—",
-      attempts: stats.n_attempted,
-      passed: stats.n_passed,
-      bestPeakFraction: stats.best_peak_fraction,
-      bestModel: stats.best_model,
+      status: summary.passed > 0 ? "PASS" : summary.attempts > 0 ? "PENDING" : "—",
+      attempts: summary.attempts,
+      passed: summary.passed,
+      bestPeakFraction: summary.bestCell?.peak_fraction ?? null,
+      bestModel: summary.bestModelId,
       bestModelLabel: bestModel,
-      bestRunId: bestCell?.run_id ?? null,
+      bestRunId: summary.bestCell?.run_id ?? null,
       solutionType,
       meta,
     } satisfies AmdProblemRow

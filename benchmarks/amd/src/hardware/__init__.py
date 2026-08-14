@@ -4,6 +4,7 @@ from src.hardware.mi350x import MI350X
 
 TARGETS = {
     "MI325X": MI325X,
+    "MI325X_SXM": MI325X,
     "MI350X": MI350X,
 }
 
