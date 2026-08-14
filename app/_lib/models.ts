@@ -176,6 +176,7 @@ export const CANONICAL_GPU = "mi325x"
  */
 export const HOME_GPU_TABS: { key: string; label: string }[] = [
   { key: "mi325x", label: "AMD MI325X" },
+  { key: "mi350x", label: "AMD MI350X" },
 ]
 
 /** Homepage ranking chart order (Mega → CUDA → Hard). */
