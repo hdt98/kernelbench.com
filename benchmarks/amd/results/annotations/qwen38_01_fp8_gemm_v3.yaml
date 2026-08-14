@@ -1,0 +1,10 @@
+run_id: qwen38_01_fp8_gemm_v3
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 01_fp8_gemm
+peak_fraction: 0.0833
+
+verdict: clean
+
+summary: "v3 supersedes the v2 cell (which superseded v1). Genuine pure-Triton fp8 e4m3 GEMM (e4m3fn->e4m3fnuz bitcast with the x4 accumulator correction, CUDA-graphed forward) with the v2 upgrades (16+2-config autotune, Triton split-K for skinny M) plus two structural changes adopted from studying the published GLM cell: (c) the 0x80 (-0 fn -> +0) byte sanitization moves out of the inner loop to a host-side once-per-tensor cached pass, and (d) the weight is pre-transposed to (K, N) contiguous once and cached, so both the main and split-K loops load the B tile already (BK, BN) and the dot needs no in-kernel tl.trans -- the inner loop is pure load+dot. Official geomean 0.0833 (shapes 0.1296/0.1126/0.0221/0.1492), vs v2 0.0674 and v1 0.0495; still below the GLM cell (0.1075), whose skinny-M shape uses a raw-HIP MFMA extension -- matching that path is next-round work. rocm_language evidence is triton (triton_jit/triton_import/triton_tl). check.py PASS (fresh seeds + numeric stress). RESULT: LOW is the bench's informational geomean<0.1 marker, not a correctness failure. No cheat patterns."

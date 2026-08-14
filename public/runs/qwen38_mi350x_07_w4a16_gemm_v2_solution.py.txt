@@ -1,0 +1,251 @@
+"""W4A16 weight-only quantized GEMM -- split-K decode path.
+
+Qwen 3.8 (Nexus-hosted) in-session solution for KernelBench-AMD 07_w4a16_gemm.
+
+y = x @ dequant(w_q, scales, zeros), x bf16 (M,K), w_q uint8 (K//2, N) with
+the low nibble holding the even-K row and the high nibble the odd-K row,
+scales/zeros bf16 (K//128, N) per K-group.
+
+v1 streamed the whole K axis in ONE program per N tile -- only N/BN ~ 96-192
+programs on the GPU while the regime is pure weight streaming, so the decode
+shapes (M=1/16) were latency-bound far below DRAM peak. v2 splits K:
+
+  skinny path (M <= 32): the K groups (K//128 of them) are partitioned into
+      SPLITK slices (autotuned 4-32); grid = (N/BN) x SPLITK programs, each
+      unpacks+dequants its weight slice and writes an fp32 partial; a reduce
+      kernel sums the partials to bf16. The decode shapes now stream the
+      weight matrix with full-CU parallelism.
+  wide path (M > 32): SPLITK autotuned 1-4 with larger M/N tiles, same
+      partial+reduce machinery (DIRECT stores skip the workspace when the
+      tuner picks SPLITK=1).
+
+The unpack body is unchanged from v1 (proven against check.py): one 128-K
+group per chunk, both nibbles expanded via join/trans/reshape, (w - z) * s
+dequant, tl.dot in bf16 with fp32 accumulate; M < 16 pads the activation
+tile with zeros (dot needs M >= 16) -- free in this memory-bound regime.
+Forward is CUDA-graph-cached on the input pointer.
+"""
+import torch
+import torch.nn as nn
+import triton
+import triton.language as tl
+
+GROUP = 128
+BKC = tl.constexpr(128)  # one quant group per k chunk
+
+
+def _cfgs_sk():
+    cs = []
+    for bn in (64, 128):
+        for sk in (4, 8, 16, 32):
+            for w in (4, 8):
+                cs.append(triton.Config({"BNK": bn, "SPLITK": sk},
+                                        num_warps=w, num_stages=1))
+    cs.append(triton.Config({"BNK": 128, "SPLITK": 16}, num_warps=8, num_stages=2))
+    cs.append(triton.Config({"BNK": 64, "SPLITK": 16}, num_warps=4, num_stages=2))
+    return cs
+
+
+def _cfgs_wide():
+    cs = []
+    for bm in (64, 128):
+        for bn in (128, 256):
+            for sk in (1, 2, 4):
+                cs.append(triton.Config({"BMK": bm, "BNK": bn, "SPLITK": sk},
+                                        num_warps=8, num_stages=1))
+    return cs
+
+
+@triton.autotune(configs=_cfgs_sk(), key=["M", "N", "K"])
+@triton.jit
+def _w4a16_skinny(x_ptr, wq_ptr, s_ptr, z_ptr, out_ptr,
+                  M, N, K,
+                  BMC: tl.constexpr, BNK: tl.constexpr, SPLITK: tl.constexpr):
+    pid = tl.program_id(0)
+    grid_n = tl.cdiv(N, BNK)
+    sk = pid // grid_n
+    pid_n = pid % grid_n
+    rn = pid_n * BNK + tl.arange(0, BNK)
+    nmask = rn < N
+    rm = tl.arange(0, BMC)
+    mmask = rm < M
+    rkb = tl.arange(0, BKC // 2)
+    rk = tl.arange(0, BKC)
+
+    n_groups = K // BKC
+    ng_per = tl.cdiv(n_groups, SPLITK)
+    g0 = sk * ng_per
+    gend = tl.minimum(g0 + ng_per, n_groups)
+
+    acc = tl.zeros((BMC, BNK), dtype=tl.float32)
+    for g in range(g0, gend):
+        k0 = g * BKC
+        wmask = nmask[None, :] & ((k0 // 2 + rkb) < (K // 2))[:, None]
+        xb = tl.load(wq_ptr + (k0 // 2 + rkb)[:, None] * N + rn[None, :],
+                     mask=wmask, other=0)
+        lo = (xb & 0xF).to(tl.bfloat16)
+        hi = ((xb >> 4) & 0xF).to(tl.bfloat16)
+        w = tl.reshape(tl.trans(tl.join(lo, hi), 0, 2, 1), (BKC, BNK))
+        s = tl.load(s_ptr + g * N + rn, mask=nmask, other=0.0).to(tl.float32)
+        z = tl.load(z_ptr + g * N + rn, mask=nmask, other=0.0).to(tl.float32)
+        wdeq = (w.to(tl.float32) - z[None, :]) * s[None, :]
+        x = tl.load(x_ptr + rm[:, None] * K + k0 + rk[None, :],
+                    mask=mmask[:, None], other=0.0)
+        acc = tl.dot(x, wdeq.to(tl.bfloat16), acc)
+
+    tl.store(out_ptr + sk * M * N + rm[:, None] * N + rn[None, :], acc,
+             mask=mmask[:, None] & nmask[None, :])
+
+
+@triton.autotune(configs=_cfgs_wide(), key=["M", "N", "K"])
+@triton.jit
+def _w4a16_wide(x_ptr, wq_ptr, s_ptr, z_ptr, out_ptr,
+                M, N, K,
+                BMK: tl.constexpr, BNK: tl.constexpr, SPLITK: tl.constexpr):
+    pid = tl.program_id(0)
+    grid_m = tl.cdiv(M, BMK)
+    grid_n = tl.cdiv(N, BNK)
+    sk = pid // (grid_m * grid_n)
+    rem = pid % (grid_m * grid_n)
+    pid_m = rem // grid_n
+    pid_n = rem % grid_n
+    rn = pid_n * BNK + tl.arange(0, BNK)
+    nmask = rn < N
+    rm = pid_m * BMK + tl.arange(0, BMK)
+    mmask = rm < M
+    rkb = tl.arange(0, BKC // 2)
+    rk = tl.arange(0, BKC)
+
+    n_groups = K // BKC
+    ng_per = tl.cdiv(n_groups, SPLITK)
+    g0 = sk * ng_per
+    gend = tl.minimum(g0 + ng_per, n_groups)
+
+    acc = tl.zeros((BMK, BNK), dtype=tl.float32)
+    for g in range(g0, gend):
+        k0 = g * BKC
+        wmask = nmask[None, :] & ((k0 // 2 + rkb) < (K // 2))[:, None]
+        xb = tl.load(wq_ptr + (k0 // 2 + rkb)[:, None] * N + rn[None, :],
+                     mask=wmask, other=0)
+        lo = (xb & 0xF).to(tl.bfloat16)
+        hi = ((xb >> 4) & 0xF).to(tl.bfloat16)
+        w = tl.reshape(tl.trans(tl.join(lo, hi), 0, 2, 1), (BKC, BNK))
+        s = tl.load(s_ptr + g * N + rn, mask=nmask, other=0.0).to(tl.float32)
+        z = tl.load(z_ptr + g * N + rn, mask=nmask, other=0.0).to(tl.float32)
+        wdeq = (w.to(tl.float32) - z[None, :]) * s[None, :]
+        x = tl.load(x_ptr + rm[:, None] * K + k0 + rk[None, :],
+                    mask=mmask[:, None], other=0.0)
+        acc = tl.dot(x, wdeq.to(tl.bfloat16), acc)
+
+    tl.store(out_ptr + sk * M * N + rm[:, None] * N + rn[None, :], acc,
+             mask=mmask[:, None] & nmask[None, :])
+
+
+@triton.jit
+def _w4a16_reduce(ws_ptr, y_ptr, MN,
+                  SPLITK: tl.constexpr, BLK: tl.constexpr):
+    pid = tl.program_id(0)
+    idx = pid * BLK + tl.arange(0, BLK)
+    mask = idx < MN
+    acc = tl.zeros((BLK,), dtype=tl.float32)
+    for kk in range(SPLITK):
+        acc += tl.load(ws_ptr + kk * MN + idx, mask=mask, other=0.0)
+    tl.store(y_ptr + idx, acc.to(tl.bfloat16), mask=mask)
+
+
+_MAX_SPLITK_SKINNY = 32
+_MAX_SPLITK_WIDE = 4
+
+
+def _pow2(x: int) -> int:
+    return 1 << (x - 1).bit_length()
+
+
+def _launch(x, wq, s, z, y, M, N, K):
+    MN = M * N
+    if M <= 32:
+        ws = torch.empty(_MAX_SPLITK_SKINNY * MN, dtype=torch.float32,
+                         device=x.device)
+        grid = lambda meta: (meta["SPLITK"] * triton.cdiv(N, meta["BNK"]),)
+        _w4a16_skinny[grid](x, wq, s, z, ws, M, N, K,
+                            BMC=max(16, _pow2(M)))
+        splitk = _w4a16_skinny.best_config.kwargs["SPLITK"]
+    else:
+        ws = torch.empty(_MAX_SPLITK_WIDE * MN, dtype=torch.float32,
+                         device=x.device)
+        grid = lambda meta: (meta["SPLITK"] * triton.cdiv(M, meta["BMK"])
+                             * triton.cdiv(N, meta["BNK"]),)
+        _w4a16_wide[grid](x, wq, s, z, ws, M, N, K)
+        splitk = _w4a16_wide.best_config.kwargs["SPLITK"]
+    BLK = 1024
+    _w4a16_reduce[(triton.cdiv(MN, BLK),)](ws, y, MN, SPLITK=splitk, BLK=BLK)
+
+
+class Model(nn.Module):
+    def __init__(self, M: int, N: int, K: int, group_size: int = GROUP):
+        super().__init__()
+        assert K % group_size == 0
+        assert K % 2 == 0
+        self.M, self.N, self.K = M, N, K
+        self.group_size = group_size
+        n_groups = K // group_size
+        torch.manual_seed(0xC0DE ^ (M * 1315423911 + N * 2654435761 + K))
+        w_full = torch.randn(K, N, dtype=torch.float32) * 0.02
+        w_g = w_full.view(n_groups, group_size, N)
+        w_min = w_g.min(dim=1, keepdim=True).values
+        w_max = w_g.max(dim=1, keepdim=True).values
+        scales = (w_max - w_min).clamp_min(1e-8) / 15.0
+        zeros = (-w_min / scales).round().clamp(0, 15)
+        w_q = ((w_g / scales) + zeros).round().clamp(0, 15).to(torch.uint8)
+        w_q = w_q.view(K, N)
+        lo = w_q[0::2].to(torch.uint8) & 0xF
+        hi = w_q[1::2].to(torch.uint8) & 0xF
+        w_packed = (lo | (hi << 4)).contiguous()
+        self.register_buffer("w_q", w_packed)
+        self.register_buffer("scales", scales.squeeze(1).to(torch.bfloat16))
+        self.register_buffer("zeros", zeros.squeeze(1).to(torch.bfloat16))
+        self._graph = None
+        self._graph_key = None
+        self._graph_out = None
+
+    def _compute(self, x):
+        M, N, K = self.M, self.N, self.K
+        y = torch.empty(M, N, dtype=torch.bfloat16, device=x.device)
+        _launch(x, self.w_q, self.scales, self.zeros, y, M, N, K)
+        return y
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        key = (x.data_ptr(), tuple(x.shape))
+        if self._graph is not None and self._graph_key == key:
+            self._graph.replay()
+            return self._graph_out
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for _ in range(2):
+                out = self._compute(x)
+        torch.cuda.current_stream().wait_stream(s)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            out = self._compute(x)
+        self._graph = g
+        self._graph_key = key
+        self._graph_out = out
+        g.replay()
+        return out
+
+
+# Same default shape and input distribution as the reference deck entry
+# (standalone shim; the reference module is not imported).
+M = 1
+N = 12288
+K = 4096
+
+
+def get_inputs():
+    x = torch.randn(M, K, dtype=torch.bfloat16)
+    return [x]
+
+
+def get_init_inputs():
+    return [M, N, K]

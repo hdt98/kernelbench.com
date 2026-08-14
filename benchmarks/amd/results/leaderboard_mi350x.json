@@ -208,13 +208,13 @@
           "solution_url": "/runs/qwen38_mi350x_05_topk_bitonic_solution.py.txt"
         },
         "07_w4a16_gemm": {
-          "run_id": "qwen38_mi350x_07_w4a16_gemm",
+          "run_id": "qwen38_mi350x_07_w4a16_gemm_v2",
           "correct": true,
           "has_solution": true,
-          "peak_fraction": 0.0187,
+          "peak_fraction": 0.0583,
           "failure_reason": null,
           "retryable_infra_failure": false,
-          "solution_url": "/runs/qwen38_mi350x_07_w4a16_gemm_solution.py.txt"
+          "solution_url": "/runs/qwen38_mi350x_07_w4a16_gemm_v2_solution.py.txt"
         }
       }
     }
@@ -367,12 +367,12 @@
     "07_w4a16_gemm": {
       "n_attempted": 2,
       "n_passed": 2,
-      "best_peak_fraction": 0.0187,
+      "best_peak_fraction": 0.0583,
       "best_model": "qwen-3.8",
       "ranked_passes": [
         {
           "model": "qwen-3.8",
-          "peak_fraction": 0.0187
+          "peak_fraction": 0.0583
         },
         {
           "model": "glm-5.2",

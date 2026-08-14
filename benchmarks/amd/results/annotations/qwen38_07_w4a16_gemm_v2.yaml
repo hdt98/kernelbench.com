@@ -1,0 +1,10 @@
+run_id: qwen38_07_w4a16_gemm_v2
+model: qwen-3.8
+harness: codex
+effort: xhigh
+problem: 07_w4a16_gemm
+peak_fraction: 0.03
+
+verdict: clean
+
+summary: "v2 supersedes the v1 cell. Genuine Triton W4A16 GEMM (same int4 unpack/dequant body as v1: one 128-K quant group per chunk, both nibbles expanded via join/trans/reshape, (w - z) * s dequant, bf16 tl.dot with fp32 accumulate, CUDA-graphed forward) with one structural upgrade: v1 ran one program per N tile with the whole K axis in a single loop -- only ~96-192 programs while the regime is pure weight streaming -- so v2 splits K into autotuned slices (skinny M<=32 path: SPLITK 4-32 over an (N/BN) x SPLITK grid with fp32 partials reduced by a second kernel; wide M>32 path: M-tiled grid with SPLITK 1-4). Decode shapes now stream the weight matrix with full-CU parallelism. Official geomean 0.0300 (shapes 0.0459/0.0282/0.0172/0.0245/0.0447) vs v1 0.0115. Same solution file as the MI350X v2 cell (md5 cdd4933f). check.py PASS (fresh seeds + numeric stress) on Triton 3.1.0/ROCm 6.2. RESULT: LOW is the bench's informational geomean<0.1 marker, not a correctness failure. No cheat patterns."
