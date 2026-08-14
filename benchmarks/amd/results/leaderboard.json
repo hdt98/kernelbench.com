@@ -100,7 +100,7 @@
           "peak_fraction": 0.0121,
           "failure_reason": null,
           "retryable_infra_failure": false,
-          "solution_url": "/runs/manual_01_glm52_fused_moe_solution.py.txt"
+          "solution_url": "/runs/20260719_060911_claude_claude-opus-4-8_01_glm52_fused_moe_solution.py.txt"
         },
         "02_deepseek_nsa": {
           "run_id": "manual_02_deepseek_nsa",
@@ -109,7 +109,7 @@
           "peak_fraction": 0.0089,
           "failure_reason": null,
           "retryable_infra_failure": false,
-          "solution_url": "/runs/manual_02_deepseek_nsa_solution.py.txt"
+          "solution_url": "/runs/20260715_212751_grok_grok-4.5_02_deepseek_nsa_solution.py.txt"
         },
         "02_segmented_decay_scan": {
           "run_id": "manual_02_segmented_decay_scan",
@@ -127,7 +127,7 @@
           "peak_fraction": 0.0085,
           "failure_reason": null,
           "retryable_infra_failure": false,
-          "solution_url": "/runs/manual_03_megaqwen_decode_solution.py.txt"
+          "solution_url": "/runs/20260802_203916_or-fable_deepseek_deepseek-v4-flash-0731_03_megaqwen_decode_solution.py.txt"
         },
         "03_topp_mask": {
           "run_id": "manual_topp_mask",
