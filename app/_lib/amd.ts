@@ -338,9 +338,8 @@ function summarizeProblem(leaderboard: Leaderboard, slug: string) {
   return { attempts, passed, bestModelId, bestCell }
 }
 
-export async function loadAmdDashboard(): Promise<AmdDashboard> {
-  const [leaderboard, metas] = await Promise.all([loadAmdLeaderboard(), loadAmdProblemMetas()])
-  const rows = leaderboard.problems.map((slug) => {
+function buildAmdRows(leaderboard: Leaderboard, metas: Map<string, AmdProblemMeta>): AmdProblemRow[] {
+  return leaderboard.problems.map((slug) => {
     const meta = metas.get(slug) ?? parseAmdProblemYaml(slug, "")
     const summary = summarizeProblem(leaderboard, slug)
     const bestModel = bestModelLabel(leaderboard, summary.bestModelId)
@@ -370,6 +369,11 @@ export async function loadAmdDashboard(): Promise<AmdDashboard> {
       meta,
     } satisfies AmdProblemRow
   })
+}
+
+export async function loadAmdDashboard(): Promise<AmdDashboard> {
+  const [leaderboard, metas] = await Promise.all([loadAmdLeaderboard(), loadAmdProblemMetas()])
+  const rows = buildAmdRows(leaderboard, metas)
   return { leaderboard, metas, rows }
 }
 
@@ -377,35 +381,7 @@ export async function loadAmdDashboardForGpu(gpu: string): Promise<AmdDashboardD
   const config = AMD_GPUS.find((g) => g.key === gpu) ?? AMD_GPUS[0]
   const leaderboard = await loadLeaderboard(config.leaderboardFile)
   const metas = await loadAmdProblemMetas()
-  const rows = leaderboard.problems.map((slug) => {
-    const meta = metas.get(slug) ?? parseAmdProblemYaml(slug, "")
-    const summary = summarizeProblem(leaderboard, slug)
-    const bestModel = bestModelLabel(leaderboard, summary.bestModelId)
-    return {
-      slug,
-      label: problemLabel(slug),
-      displayName: meta.displayName,
-      precision: meta.precision,
-      regime: meta.regime,
-      status: summary.passed > 0 ? "PASS" : summary.attempts > 0 ? "PENDING" : "—",
-      attempts: summary.attempts,
-      passed: summary.passed,
-      bestPeakFraction: summary.bestCell?.peak_fraction ?? null,
-      bestModel: summary.bestModelId,
-      bestModelLabel: bestModel,
-      bestRunId: summary.bestCell?.run_id ?? null,
-      solutionType: summary.bestCell
-        ? summary.bestCell.has_solution
-          ? summary.bestCell.correct === true
-            ? "Triton / HIP kernel"
-            : "Written (unverified)"
-          : "Not attempted"
-        : summary.attempts > 0
-          ? "Written (unverified)"
-          : "Not attempted",
-      meta,
-    } satisfies AmdProblemRow
-  })
+  const rows = buildAmdRows(leaderboard, metas)
   return { gpu: config.key, leaderboard, rows }
 }
 

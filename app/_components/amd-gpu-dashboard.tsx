@@ -69,7 +69,8 @@ export function AmdGpuDashboard({
 
       <section className="summary-section">
         {gpus.length > 1 && (
-          <div className="gpu-toggle" role="tablist" aria-label="GPU board" style={{ marginBottom: "1.5rem", display: "flex", gap: "0.5rem", justifyContent: "center" }}>
+          <div style={{ textAlign: "center", marginBottom: "1.5rem" }}>
+            <div className="gpu-toggle" role="tablist" aria-label="GPU board">
             {gpus.map((g) => (
               <button
                 key={g.key}
@@ -82,6 +83,7 @@ export function AmdGpuDashboard({
                 {g.label}
               </button>
             ))}
+            </div>
           </div>
         )}
         <div className="summary-grid">
